@@ -34,12 +34,12 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// ✅ Frontend domains
+// ✅ Frontend domains - Remove trailing slashes to ensure exact match
 const allowedOrigins = [
-  process.env.FRONTEND_URL,           // from .env
-  "https://codesyncai.vercel.app",    // production frontend
-  "http://localhost:5173",            // local dev
-  "http://localhost:3000",            // fallback
+  process.env.FRONTEND_URL?.replace(/\/$/, ''),  // from .env, remove trailing slash
+  "https://codesyncai.vercel.app",               // production frontend
+  "http://localhost:5173",                       // local dev
+  "http://localhost:3000",                       // fallback
 ].filter(Boolean); // removes undefined
 
 // ✅ Centralized CORS logic
