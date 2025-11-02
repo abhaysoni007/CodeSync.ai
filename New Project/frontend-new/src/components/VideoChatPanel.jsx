@@ -186,8 +186,11 @@ const VideoChatPanel = ({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ],
+      iceCandidatePoolSize: 10,
       iceCandidatePoolSize: 10
     });
 
@@ -259,9 +262,17 @@ const VideoChatPanel = ({
       console.log(`📦 Processing ${pendingIceRef.current[remoteId].length} queued ICE candidates`);
       for (const candidate of pendingIceRef.current[remoteId]) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          // Only add if peer connection is in stable or have-remote-offer state
+          if (pc.signalingState !== 'closed' && pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
         } catch (e) {
-          console.warn('ICE candidate error:', e.message);
+          // Silently ignore ICE candidate errors during processing
+          if (e.message.includes('remote description was null')) {
+            // Expected - ignore
+          } else {
+            console.warn('ICE candidate error:', e.message);
+          }
         }
       }
       delete pendingIceRef.current[remoteId];
