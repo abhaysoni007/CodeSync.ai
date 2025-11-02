@@ -116,18 +116,8 @@ const ProjectRoom = () => {
 
     // Collaboration events
     socketRef.current.on('code-update', (data) => {
-      console.log('📥 Code update received:', {
-        receivedFileId: data.fileId,
-        currentFileId: activeFile?._id,
-        fileIdMatch: data.fileId === activeFile?._id,
-        receivedUserId: data.userId,
-        currentUserId: user?.id,
-        userIdDifferent: data.userId !== user?.id,
-        willApplyUpdate: data.fileId === activeFile?._id && data.userId !== user?.id
-      });
-      
+      console.log('Code update received:', data);
       if (data.fileId === activeFile?._id && data.userId !== user?.id) {
-        console.log('✅ Applying remote code update');
         // Set flag to prevent re-emitting this update
         isRemoteUpdateRef.current = true;
         setCode(data.code);
@@ -156,14 +146,7 @@ const ProjectRoom = () => {
     });
 
     socketRef.current.on('cursor-update', (data) => {
-      console.log('🖱️ Cursor update:', {
-        receivedFileId: data.fileId,
-        currentFileId: activeFile?._id,
-        receivedUserId: data.userId,
-        currentUserId: user?.id,
-        willUpdate: data.userId !== user?.id && data.fileId === activeFile?._id
-      });
-      
+      console.log('Cursor update:', data);
       if (data.userId !== user?.id && data.fileId === activeFile?._id) {
         const userColor = data.color || generateUserColor(data.userId);
         
