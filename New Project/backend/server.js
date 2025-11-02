@@ -34,16 +34,47 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// Initialize Socket.IO
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*", // Allow all origins for testing
-    methods: ["GET", "POST"],
-    credentials: false // Must be false when origin is "*"
+// ✅ Frontend domains
+const allowedOrigins = [
+  process.env.FRONTEND_URL,           // from .env
+  "https://codesyncai.vercel.app",    // production frontend
+  "http://localhost:5173",            // local dev
+  "http://localhost:3000",            // fallback
+].filter(Boolean); // removes undefined
+
+// ✅ Centralized CORS logic
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn("❌ Blocked by CORS:", origin);
+    return callback(new Error("Not allowed by CORS"));
   },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+
+// ✅ Security
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ✅ Socket.IO Setup (same origins)
+const io = new Server(httpServer, {
+  cors: corsOptions,
   maxHttpBufferSize: 1e8, // 100 MB for large Yjs updates
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
 });
 
 // Setup Yjs collaboration handlers
@@ -55,21 +86,6 @@ setupTerminalSockets(io);
 // Make io accessible to routes
 app.set('io', io);
 
-// Security middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-// CORS Configuration - Allow all origins for testing
-const corsOptions = {
-  origin: "*", // Allow all origins for testing
-  credentials: false, // Must be false when origin is "*"
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-app.use(cors(corsOptions));
-
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -78,11 +94,6 @@ const limiter = rateLimit({
 });
 
 app.use('/auth/', limiter);
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
