@@ -37,14 +37,9 @@ const httpServer = createServer(app);
 // Initialize Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: [
-      "https://codesyncai.vercel.app",
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175"
-    ],
+    origin: "*", // Allow all origins for testing
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: false // Must be false when origin is "*"
   },
   maxHttpBufferSize: 1e8, // 100 MB for large Yjs updates
   pingTimeout: 60000,
@@ -65,15 +60,10 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS Configuration
+// CORS Configuration - Allow all origins for testing
 const corsOptions = {
-  origin: [
-    "https://codesyncai.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175"
-  ],
-  credentials: true,
+  origin: "*", // Allow all origins for testing
+  credentials: false, // Must be false when origin is "*"
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
