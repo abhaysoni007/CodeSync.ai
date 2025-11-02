@@ -53,7 +53,8 @@ const Profile = () => {
         
         // Set avatar preview if exists
         if (userData.avatar) {
-          setAvatarPreview(`http://localhost:5000${userData.avatar}`);
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+          setAvatarPreview(`${API_URL}${userData.avatar}`);
         }
 
         // Check which API keys are saved
@@ -128,7 +129,8 @@ const Profile = () => {
         
         // Update avatar preview
         if (response.data.data.user.avatar) {
-          setAvatarPreview(`http://localhost:5000${response.data.data.user.avatar}`);
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+          setAvatarPreview(`${API_URL}${response.data.data.user.avatar}`);
         }
       }
     } catch (error) {
