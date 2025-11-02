@@ -1,0 +1,27 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:5000",
+  "backendAuthType": "public",
+  "executionArgs": {
+    "projectName": "New Project",
+    "projectPath": "c:\\Users\\yuvra\\Downloads\\Testing 2 - Copy\\New Project",
+    "testIds": [
+      "TC001",
+      "TC002",
+      "TC003",
+      "TC004",
+      "TC005",
+      "TC006",
+      "TC007",
+      "TC008",
+      "TC009"
+    ],
+    "additionalInstruction": "Test all Delta Engine version control APIs including snapshot creation, version history, rollback, and compression features",
+    "envs": {
+      "API_KEY": "sk-user-NGjD4_Z7P9B6ApbP5lZmTOcyIYLkFZTnYKOTmfdq02izLaKyrqB9U6XcJSBOoWuxCYOAgPi1L2IaM7gx4Qw5qE4FKf7QdGVdayFmGOWPFpBpWCQqoduDKYVvcbe2e0kve_U"
+    }
+  },
+  "proxy": "http://64a0a0c5-3365-4fe9-a8a5-4c66ad3699dc:b3an9bhLOWuKd1dyaRQmrwSVw347DVn0@tun.testsprite.com:8080"
+}

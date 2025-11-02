@@ -1,0 +1,51 @@
+{
+  "id": "root",
+  "name": "root",
+  "type": "folder",
+  "children": [
+    {
+      "id": "src",
+      "name": "src",
+      "type": "folder",
+      "children": [
+        {
+          "id": "index.js",
+          "name": "index.js",
+          "type": "file",
+          "content": "// Welcome to your collaborative code editor!\nconsole.log(\"Hello World!\");"
+        },
+        {
+          "id": "app.js",
+          "name": "app.js",
+          "type": "file",
+          "content": "// Your main application file\n\nfunction App() {\n  return \"Hello from App!\";\n}\n\nexport default App;"
+        }
+      ]
+    },
+    {
+      "id": "public",
+      "name": "public",
+      "type": "folder",
+      "children": [
+        {
+          "id": "index.html",
+          "name": "index.html",
+          "type": "file",
+          "content": "<!DOCTYPE html>\n<html>\n  <head>\n    <title>My App</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>"
+        }
+      ]
+    },
+    {
+      "id": "readme.md",
+      "name": "README.md",
+      "type": "file",
+      "content": "# Welcome to Your Project\n\n## Features\n\n- Real-time collaboration\n- VS Code-style file explorer\n- Instant sync across all users\n\nStart coding!\n"
+    },
+    {
+      "id": "package.json",
+      "name": "package.json",
+      "type": "file",
+      "content": "{\n  \"name\": \"collaborative-project\",\n  \"version\": \"1.0.0\",\n  \"description\": \"Real-time collaborative coding\",\n  \"main\": \"src/index.js\"\n}"
+    }
+  ]
+}

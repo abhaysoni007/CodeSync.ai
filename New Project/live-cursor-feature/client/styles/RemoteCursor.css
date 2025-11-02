@@ -1,0 +1,282 @@
+/* Remote Cursor Styles for Monaco Editor */
+/* Colored cursors, name badges, and selection highlights */
+
+/* Cursor line indicator */
+.remote-cursor {
+  position: relative;
+  background: transparent !important;
+}
+
+/* Cursor line indicator - More visible like Figma */
+.remote-cursor-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px !important;
+  height: 100%;
+  background: currentColor !important;
+  animation: cursor-pulse 1.5s ease-in-out infinite;
+  z-index: 1000;
+  border-radius: 1px;
+  box-shadow: 0 0 10px currentColor, 0 0 5px currentColor !important;
+}
+
+/* Smooth pulse animation like Figma */
+@keyframes cursor-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 8px currentColor;
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 12px currentColor;
+  }
+}
+
+/* Cursor glyph in margin */
+.remote-cursor-glyph {
+  width: 4px !important;
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+/* Name badge widget - Small cursor point with initials and hover tooltip */
+.remote-cursor-widget {
+  position: absolute !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  border-radius: 50% !important;
+  pointer-events: auto !important;
+  z-index: 10000 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 2px rgba(255, 255, 255, 0.9) !important;
+  animation: cursor-point-appear 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  transform-origin: center !important;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  cursor: pointer !important;
+  
+  /* Show initials */
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: white !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  line-height: 1 !important;
+  text-indent: 0 !important;
+  overflow: visible !important;
+}
+
+/* Tooltip with user name - shown on hover */
+.remote-cursor-widget::after {
+  content: attr(data-user-name) !important;
+  position: absolute !important;
+  top: -38px !important;
+  left: 50% !important;
+  transform: translateX(-50%) scale(0) !important;
+  padding: 8px 14px !important;
+  background: rgba(30, 30, 30, 0.95) !important;
+  color: white !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+  border-radius: 8px !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  z-index: 10001 !important;
+  text-indent: 0 !important;
+  letter-spacing: 0.3px !important;
+}
+
+/* Tooltip arrow */
+.remote-cursor-widget::before {
+  content: '' !important;
+  position: absolute !important;
+  top: -8px !important;
+  left: 50% !important;
+  transform: translateX(-50%) scale(0) !important;
+  width: 0 !important;
+  height: 0 !important;
+  border-left: 6px solid transparent !important;
+  border-right: 6px solid transparent !important;
+  border-top: 6px solid rgba(30, 30, 30, 0.95) !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  z-index: 10001 !important;
+}
+
+/* Show tooltip on hover */
+.remote-cursor-widget:hover::after,
+.remote-cursor-widget:hover::before {
+  opacity: 1 !important;
+  transform: translateX(-50%) scale(1) !important;
+}
+
+/* Pulse effect when typing */
+.remote-cursor-widget.typing {
+  animation: cursor-point-pulse 0.8s ease-in-out infinite !important;
+}
+
+@keyframes cursor-point-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 2px rgba(255, 255, 255, 0.9);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(255, 255, 255, 1), 0 0 20px currentColor;
+  }
+}
+
+@keyframes cursor-point-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Fade out animation when cursor disappears */
+.remote-cursor-widget.fade-out {
+  animation: cursor-point-disappear 0.2s ease-out forwards;
+}
+
+@keyframes cursor-point-disappear {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+
+/* Selection highlight base styles */
+.remote-selection {
+  position: relative;
+  pointer-events: none;
+}
+
+/* Selection highlight - More vibrant like Figma/Canva */
+.remote-selection-inline {
+  border-radius: 3px;
+  opacity: 0.25;
+  animation: selection-appear 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  mix-blend-mode: multiply;
+}
+
+@keyframes selection-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+}
+
+/* Smooth transitions for cursor movements - Figma-like smoothness */
+.monaco-editor .view-overlays .remote-cursor-line {
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Selection border for better visibility */
+.remote-selection::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* Hover effects for cursor badge */
+.remote-cursor-widget:hover {
+  transform: scale(1.15) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(255, 255, 255, 1) !important;
+}
+
+/* Different cursor styles for different states */
+.remote-cursor.typing .remote-cursor-line::before {
+  animation: cursor-typing 0.5s ease-in-out infinite;
+}
+
+@keyframes cursor-typing {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .remote-cursor-widget {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 10px !important;
+  }
+
+  .remote-cursor-widget::after {
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+  }
+
+  .remote-cursor-line::before {
+    width: 1.5px !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .remote-cursor-widget {
+    border: 2px solid white !important;
+    font-weight: 700 !important;
+  }
+
+  .remote-cursor-line::before {
+    width: 3px !important;
+  }
+
+  .remote-selection-inline {
+    opacity: 1 !important;
+    border: 2px solid currentColor !important;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .remote-cursor-line::before,
+  .remote-cursor.typing .remote-cursor-line::before {
+    animation: none;
+    opacity: 1;
+  }
+
+  .remote-cursor-widget,
+  .remote-selection-inline {
+    animation: none;
+  }
+
+  .monaco-editor .view-overlays .remote-cursor-line {
+    transition: none;
+  }
+}

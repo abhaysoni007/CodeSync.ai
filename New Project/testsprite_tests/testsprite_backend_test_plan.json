@@ -1,0 +1,47 @@
+[
+  {
+    "id": "TC001",
+    "title": "initialize delta sync for a file",
+    "description": "Test the /delta/init POST endpoint to verify that delta sync initialization creates the first snapshot with correct metadata and returns success."
+  },
+  {
+    "id": "TC002",
+    "title": "create a new snapshot with delta compression",
+    "description": "Test the /delta/snapshot POST endpoint to ensure new snapshots are created with delta compression, storing only incremental changes and returning the new version number."
+  },
+  {
+    "id": "TC003",
+    "title": "retrieve paginated version history for a file",
+    "description": "Test the /delta/history/:fileId GET endpoint to verify retrieval of version history with pagination parameters limit and skip, returning correct snapshots and total count."
+  },
+  {
+    "id": "TC004",
+    "title": "rollback file to a specific snapshot version",
+    "description": "Test the /delta/rollback POST endpoint to ensure rollback restores file content exactly matching the chosen snapshot version and returns the snapshot details."
+  },
+  {
+    "id": "TC005",
+    "title": "compare two snapshots for differences",
+    "description": "Test the /delta/compare POST endpoint to verify comparison of two snapshots returns accurate unified diff format, lines added, and lines removed."
+  },
+  {
+    "id": "TC006",
+    "title": "get snapshot statistics for a file",
+    "description": "Test the /delta/stats/:fileId GET endpoint to verify retrieval of snapshot statistics including total snapshots, storage usage, average compression ratio, and timestamps."
+  },
+  {
+    "id": "TC007",
+    "title": "cleanup old snapshots beyond retention period",
+    "description": "Test the /delta/cleanup/:fileId POST endpoint to ensure snapshots older than specified daysToKeep are deleted and the deleted count is returned."
+  },
+  {
+    "id": "TC008",
+    "title": "get file content at a specific version",
+    "description": "Test the /delta/content/:fileId GET endpoint to verify reconstruction and retrieval of file content at a specified version number or latest if not specified."
+  },
+  {
+    "id": "TC009",
+    "title": "get all delta changes since a given version",
+    "description": "Test the /delta/deltas-since/:fileId GET endpoint to ensure retrieval of all delta changes since the specified version number, returning an array of delta snapshots."
+  }
+]

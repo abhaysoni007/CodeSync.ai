@@ -1,0 +1,49 @@
+{
+  "name": "live-cursor-feature",
+  "version": "1.0.0",
+  "description": "Real-time cursor tracking module for collaborative code editors with Monaco Editor and Socket.IO",
+  "main": "client/utils/remoteCursorUtils.js",
+  "type": "module",
+  "scripts": {
+    "example:client": "cd examples && npm run dev",
+    "example:server": "node server/exampleServer.js"
+  },
+  "keywords": [
+    "collaborative-editing",
+    "live-cursor",
+    "monaco-editor",
+    "socket.io",
+    "real-time",
+    "cursor-tracking",
+    "remote-cursor",
+    "multiplayer",
+    "code-editor",
+    "figma-like"
+  ],
+  "author": "Extracted from Collaborative Code Editor Project",
+  "license": "MIT",
+  "peerDependencies": {
+    "monaco-editor": "^0.44.0",
+    "socket.io": "^4.6.0",
+    "socket.io-client": "^4.6.0"
+  },
+  "devDependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "extracted-feature"
+  },
+  "files": [
+    "client/",
+    "server/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "id": "root",
+  "name": "root",
+  "type": "folder",
+  "children": [
+    {
+      "id": "src",
+      "name": "src",
+      "type": "folder",
+      "children": [
+        {
+          "id": "index.js",
+          "name": "index.js",
+          "type": "file",
+          "content": "// Start coding here\nconsole.log(\"Hello World!\");"
+        },
+        {
+          "id": "hello1.py_1762025142235_xdfzg",
+          "name": "hello1.py",
+          "type": "file",
+          "content": ""
+        },
+        {
+          "id": "hey_1762025151101_aijkw",
+          "name": "hey",
+          "type": "folder",
+          "children": [
+            {
+              "id": "saf.py_1762025157973_4qjry",
+              "name": "saf.py",
+              "type": "file",
+              "content": ""
+            },
+            {
+              "id": "sdfksdh_1762025171903_ke27u",
+              "name": "sdfksdh",
+              "type": "folder",
+              "children": []
+            },
+            {
+              "id": "g.py_1762032481842_xfr52",
+              "name": "g.py",
+              "type": "file",
+              "content": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "readme.md",
+      "name": "README.md",
+      "type": "file",
+      "content": "# Welcome to your project\n\nStart building something amazing!"
+    },
+    {
+      "id": "hello.py_1762024720001_8o2h8",
+      "name": "hello.py",
+      "type": "file",
+      "content": ""
+    },
+    {
+      "id": "f.py_1762032443898_l7thw",
+      "name": "f.py",
+      "type": "file",
+      "content": ""
+    }
+  ]
+}

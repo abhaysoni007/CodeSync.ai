@@ -1,0 +1,586 @@
+/* ============================================
+   FILE EXPLORER - VS Code Style
+   ============================================ */
+
+.file-explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  user-select: none;
+}
+
+/* Theme Styles */
+.file-explorer.dark {
+  background-color: #1e1e1e;
+  color: #cccccc;
+}
+
+.file-explorer.light {
+  background-color: #f3f3f3;
+  color: #383838;
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+
+.file-explorer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid;
+  flex-shrink: 0;
+}
+
+.file-explorer.dark .file-explorer-header {
+  border-color: #2d2d2d;
+  background-color: #252526;
+}
+
+.file-explorer.light .file-explorer-header {
+  border-color: #e5e5e5;
+  background-color: #ffffff;
+}
+
+.file-explorer-header h3 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+  opacity: 0.8;
+}
+
+/* Run File Button */
+.run-file-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0;
+  background: rgba(75, 150, 75, 0.8);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.tree-node-content:hover .run-file-btn {
+  display: flex;
+  opacity: 1;
+}
+
+.run-file-btn:hover {
+  background: rgba(75, 150, 75, 1);
+  transform: scale(1.1);
+}
+
+.run-file-btn:active {
+  transform: scale(0.95);
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  position: relative;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: inherit;
+}
+
+.file-explorer.dark .icon-btn:hover {
+  background-color: #2a2d2e;
+}
+
+.file-explorer.light .icon-btn:hover {
+  background-color: #e8e8e8;
+}
+
+.icon-btn .plus-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: #007acc;
+  border-radius: 50%;
+  padding: 1px;
+}
+
+/* ============================================
+   FILE TREE
+   ============================================ */
+
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+/* Custom Scrollbar */
+.file-tree::-webkit-scrollbar {
+  width: 10px;
+}
+
+.file-explorer.dark .file-tree::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.file-explorer.light .file-tree::-webkit-scrollbar-track {
+  background: #f3f3f3;
+}
+
+.file-explorer.dark .file-tree::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+.file-explorer.light .file-tree::-webkit-scrollbar-thumb {
+  background: #c4c4c4;
+  border-radius: 5px;
+}
+
+.file-explorer.dark .file-tree::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+}
+
+.file-explorer.light .file-tree::-webkit-scrollbar-thumb:hover {
+  background: #a6a6a6;
+}
+
+/* ============================================
+   TREE NODE
+   ============================================ */
+
+.tree-node {
+  width: 100%;
+}
+
+.tree-node-content {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  white-space: nowrap;
+  border-radius: 4px;
+  margin: 1px 4px;
+}
+
+.file-explorer.dark .tree-node-content:hover {
+  background-color: #2a2d2e;
+}
+
+.file-explorer.light .tree-node-content:hover {
+  background-color: #e8e8e8;
+}
+
+.file-explorer.dark .tree-node-content.selected {
+  background-color: #37373d;
+}
+
+.file-explorer.light .tree-node-content.selected {
+  background-color: #d6d6d6;
+}
+
+.file-explorer.dark .tree-node-content.selected:hover {
+  background-color: #3e3e42;
+}
+
+.file-explorer.light .tree-node-content.selected:hover {
+  background-color: #c8c8c8;
+}
+
+/* Expand/Collapse Icon */
+.expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.expand-icon:hover {
+  opacity: 0.8;
+}
+
+/* Node Icon */
+.node-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.node-icon img {
+  display: block;
+  object-fit: contain;
+}
+
+/* Node Name */
+.node-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Rename Input */
+.rename-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 2px 4px;
+  border: 1px solid #007acc;
+  border-radius: 2px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+
+.file-explorer.dark .rename-input {
+  background-color: #1e1e1e;
+}
+
+.file-explorer.light .rename-input {
+  background-color: #ffffff;
+}
+
+/* Tree Node Children (Indentation) */
+.tree-node-children {
+  padding-left: 16px;
+}
+
+/* ============================================
+   CONTEXT MENU
+   ============================================ */
+
+.context-menu {
+  min-width: 180px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+  z-index: 10000;
+  animation: contextMenuFadeIn 0.15s ease;
+}
+
+.context-menu.dark {
+  background-color: #2d2d30;
+  border: 1px solid #454545;
+}
+
+.context-menu.light {
+  background-color: #ffffff;
+  border: 1px solid #d4d4d4;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.context-menu.dark .context-menu-item:hover {
+  background-color: #094771;
+}
+
+.context-menu.light .context-menu-item:hover {
+  background-color: #e8e8e8;
+}
+
+.context-menu-item.danger {
+  color: #f48771;
+}
+
+.context-menu-item.danger:hover {
+  background-color: #5a1d1d !important;
+  color: #ff6b6b;
+}
+
+.context-menu.light .context-menu-item.danger:hover {
+  background-color: #ffe0e0 !important;
+  color: #d32f2f;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+}
+
+.context-menu.dark .context-menu-divider {
+  background-color: #454545;
+}
+
+.context-menu.light .context-menu-divider {
+  background-color: #d4d4d4;
+}
+
+/* ============================================
+   MODAL DIALOG
+   ============================================ */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-overlay.dark {
+  background-color: rgba(0, 0, 0, 0.6);
+}
+
+.modal-overlay.light {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+.modal-content {
+  min-width: 400px;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.modal-content.dark {
+  background-color: #2d2d30;
+  color: #cccccc;
+}
+
+.modal-content.light {
+  background-color: #ffffff;
+  color: #383838;
+}
+
+.modal-content h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border-radius: 4px;
+  border: 1px solid;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.modal-content.dark .modal-input {
+  background-color: #1e1e1e;
+  border-color: #3c3c3c;
+  color: #cccccc;
+}
+
+.modal-content.light .modal-input {
+  background-color: #ffffff;
+  border-color: #d4d4d4;
+  color: #383838;
+}
+
+.modal-input:focus {
+  border-color: #007acc;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.btn-primary {
+  background-color: #007acc;
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: #0098ff;
+}
+
+.btn-primary:active {
+  background-color: #005a9e;
+}
+
+.btn-secondary {
+  background-color: transparent;
+  color: inherit;
+  border: 1px solid;
+}
+
+.modal-content.dark .btn-secondary {
+  border-color: #3c3c3c;
+}
+
+.modal-content.light .btn-secondary {
+  border-color: #d4d4d4;
+}
+
+.modal-content.dark .btn-secondary:hover {
+  background-color: #2a2d2e;
+}
+
+.modal-content.light .btn-secondary:hover {
+  background-color: #e8e8e8;
+}
+
+/* ============================================
+   LOADING & ERROR STATES
+   ============================================ */
+
+.file-explorer-loading,
+.file-explorer-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  padding: 20px;
+  text-align: center;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+.file-explorer.dark .spinner {
+  border-color: #3c3c3c;
+  border-top-color: transparent;
+}
+
+.file-explorer.light .spinner {
+  border-color: #d4d4d4;
+  border-top-color: transparent;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.file-explorer-error button {
+  padding: 8px 16px;
+  background-color: #007acc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color 0.2s ease;
+}
+
+.file-explorer-error button:hover {
+  background-color: #0098ff;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+  .modal-content {
+    min-width: 90%;
+    max-width: 90%;
+  }
+
+  .file-explorer-header h3 {
+    font-size: 10px;
+  }
+
+  .node-name {
+    font-size: 12px;
+  }
+
+  .context-menu-item {
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+.tree-node-content {
+  animation: fadeInSlide 0.2s ease;
+}
+
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Smooth transitions */
+.tree-node-children {
+  overflow: hidden;
+  transition: height 0.2s ease;
+}

@@ -1,0 +1,346 @@
+/* ============================================
+   DASHBOARD DEMO STYLES
+   ============================================ */
+
+.dashboard-demo {
+  display: grid;
+  grid-template-columns: 250px 1fr 300px;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  background-color: #1e1e1e;
+  color: #cccccc;
+}
+
+/* ============================================
+   SIDEBAR (File Explorer)
+   ============================================ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #2d2d2d;
+  background-color: #252526;
+  overflow: hidden;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  background-color: #2d2d30;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.connected {
+  background-color: #4caf50;
+}
+
+.status-indicator.disconnected {
+  background-color: #f44336;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.main-file-explorer {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ============================================
+   MAIN CONTENT
+   ============================================ */
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.editor-area {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+}
+
+/* Welcome Screen */
+.welcome-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  gap: 24px;
+}
+
+.welcome-screen h1 {
+  font-size: 32px;
+  margin: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.welcome-screen > p {
+  font-size: 16px;
+  color: #888;
+  margin: 0;
+}
+
+.quick-actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.action-btn {
+  padding: 12px 24px;
+  font-size: 14px;
+  background-color: #2d2d30;
+  color: #cccccc;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.action-btn:hover {
+  background-color: #37373d;
+  border-color: #007acc;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 122, 204, 0.3);
+}
+
+/* File Info Display */
+.file-info {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.file-info h2 {
+  font-size: 24px;
+  margin: 0 0 8px 0;
+  color: #ffffff;
+}
+
+.file-path {
+  font-size: 13px;
+  color: #888;
+  margin: 0 0 24px 0;
+  font-family: 'Courier New', monospace;
+}
+
+.file-content-preview {
+  background-color: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.file-content-preview h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+.file-content-preview pre {
+  margin: 0;
+  font-family: 'Courier New', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.editor-placeholder {
+  background: linear-gradient(135deg, #667eea22 0%, #764ba222 100%);
+  border: 2px dashed #667eea;
+  border-radius: 8px;
+  padding: 40px;
+  text-align: center;
+}
+
+.editor-placeholder p {
+  margin: 8px 0;
+  font-size: 14px;
+  color: #888;
+}
+
+/* ============================================
+   RIGHT SIDEBAR
+   ============================================ */
+
+.right-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border-left: 1px solid #2d2d2d;
+  background-color: #252526;
+  overflow-y: auto;
+}
+
+.panel {
+  background-color: #2d2d30;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+.panel p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+/* Collaborators */
+.collaborators-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.collaborator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background-color: #37373d;
+  border-radius: 4px;
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+/* Activity */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background-color: #37373d;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #888;
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+
+.editor-area::-webkit-scrollbar,
+.right-sidebar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.editor-area::-webkit-scrollbar-track,
+.right-sidebar::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.editor-area::-webkit-scrollbar-thumb,
+.right-sidebar::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+.editor-area::-webkit-scrollbar-thumb:hover,
+.right-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 1200px) {
+  .dashboard-demo {
+    grid-template-columns: 220px 1fr 250px;
+  }
+}
+
+@media (max-width: 992px) {
+  .dashboard-demo {
+    grid-template-columns: 200px 1fr;
+  }
+
+  .right-sidebar {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-demo {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: -250px;
+    top: 0;
+    height: 100vh;
+    width: 250px;
+    z-index: 1000;
+    transition: left 0.3s ease;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+
+  .welcome-screen h1 {
+    font-size: 24px;
+  }
+
+  .quick-actions {
+    flex-direction: column;
+    width: 100%;
+    max-width: 300px;
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "root",
+  "name": "root",
+  "type": "folder",
+  "children": [
+    {
+      "id": "hello_1762063654617_r6nae",
+      "name": "hello",
+      "type": "folder",
+      "children": []
+    },
+    {
+      "id": "hey_1762063660264_05rwq",
+      "name": "hey",
+      "type": "folder",
+      "children": [
+        {
+          "id": "g.py_1762063679288_a43pm",
+          "name": "g.py",
+          "type": "file",
+          "content": ""
+        }
+      ]
+    },
+    {
+      "id": "xyz.py_1762063668095_6vsa4",
+      "name": "xyz.py",
+      "type": "file",
+      "content": ""
+    }
+  ]
+}

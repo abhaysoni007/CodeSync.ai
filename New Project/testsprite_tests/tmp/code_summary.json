@@ -1,0 +1,569 @@
+{
+  "tech_stack": [
+    "Node.js",
+    "Express.js",
+    "Socket.IO",
+    "MongoDB",
+    "Mongoose",
+    "JWT Authentication",
+    "diff (text diffing library)",
+    "pako (compression)",
+    "uuid"
+  ],
+  "features": [
+    {
+      "name": "Delta Snapshot Initialization",
+      "description": "Initialize delta sync tracking for a file, creating the first snapshot in the version history",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "info": {
+          "title": "Delta Engine API - Initialization",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/delta/init": {
+            "post": {
+              "summary": "Initialize delta sync for a file",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["projectId", "fileId", "initialContent"],
+                      "properties": {
+                        "projectId": {
+                          "type": "string",
+                          "description": "MongoDB ObjectId of the project"
+                        },
+                        "fileId": {
+                          "type": "string",
+                          "description": "File identifier (path or ID)"
+                        },
+                        "initialContent": {
+                          "type": "string",
+                          "description": "Initial file content"
+                        },
+                        "userId": {
+                          "type": "string",
+                          "description": "User ID creating the snapshot"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Delta sync initialized successfully",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "snapshot": {
+                            "$ref": "#/components/schemas/DeltaSnapshot"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "500": {
+                  "description": "Server error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Create Snapshot",
+      "description": "Create a new version snapshot with delta compression for efficient storage",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/services/DeltaEngine/DeltaCompressor.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/snapshot": {
+            "post": {
+              "summary": "Create a new snapshot with delta",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["projectId", "fileId", "content"],
+                      "properties": {
+                        "projectId": {"type": "string"},
+                        "fileId": {"type": "string"},
+                        "content": {"type": "string", "description": "Current file content"},
+                        "oldContent": {"type": "string", "description": "Previous content for diff"},
+                        "message": {"type": "string", "description": "Commit message"},
+                        "trigger": {
+                          "type": "string",
+                          "enum": ["manual", "time", "edit-count", "idle", "cursor-jump", "focus-loss", "undo-redo", "batch"],
+                          "description": "What triggered the snapshot"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Snapshot created",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "snapshot": {"$ref": "#/components/schemas/DeltaSnapshot"},
+                          "versionNumber": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Get Version History",
+      "description": "Retrieve version history for a file with pagination support",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/history/:fileId": {
+            "get": {
+              "summary": "Get version history for a file",
+              "parameters": [
+                {
+                  "name": "fileId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {"type": "string"}
+                },
+                {
+                  "name": "limit",
+                  "in": "query",
+                  "schema": {"type": "integer", "default": 50}
+                },
+                {
+                  "name": "skip",
+                  "in": "query",
+                  "schema": {"type": "integer", "default": 0}
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Version history retrieved",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "snapshots": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/DeltaSnapshot"}
+                          },
+                          "total": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Rollback to Version",
+      "description": "Restore file content to a specific version snapshot",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/services/DeltaEngine/DeltaCompressor.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/rollback": {
+            "post": {
+              "summary": "Rollback file to a specific version",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["projectId", "fileId", "snapshotId"],
+                      "properties": {
+                        "projectId": {"type": "string"},
+                        "fileId": {"type": "string"},
+                        "snapshotId": {"type": "string", "description": "UUID of the snapshot to restore"},
+                        "userId": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Rollback successful",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "content": {"type": "string", "description": "Restored file content"},
+                          "snapshot": {"$ref": "#/components/schemas/DeltaSnapshot"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Compare Versions",
+      "description": "Compare two version snapshots to see differences",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/utils/diffUtils.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/compare": {
+            "post": {
+              "summary": "Compare two snapshots",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["fileId", "snapshotId1", "snapshotId2"],
+                      "properties": {
+                        "fileId": {"type": "string"},
+                        "snapshotId1": {"type": "string"},
+                        "snapshotId2": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Comparison result",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "diff": {"type": "string", "description": "Unified diff format"},
+                          "linesAdded": {"type": "integer"},
+                          "linesRemoved": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Get Snapshot Statistics",
+      "description": "Get statistics about snapshots for a file (count, storage usage, compression ratio)",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/stats/:fileId": {
+            "get": {
+              "summary": "Get snapshot statistics",
+              "parameters": [
+                {
+                  "name": "fileId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {"type": "string"}
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Statistics retrieved",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "stats": {
+                            "type": "object",
+                            "properties": {
+                              "totalSnapshots": {"type": "integer"},
+                              "totalSize": {"type": "integer"},
+                              "avgCompressionRatio": {"type": "number"},
+                              "oldestSnapshot": {"type": "string", "format": "date-time"},
+                              "newestSnapshot": {"type": "string", "format": "date-time"}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Cleanup Old Snapshots",
+      "description": "Delete snapshots older than specified days to free up storage",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/cleanup/:fileId": {
+            "post": {
+              "summary": "Cleanup old snapshots",
+              "parameters": [
+                {
+                  "name": "fileId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {"type": "string"}
+                }
+              ],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "daysToKeep": {
+                          "type": "integer",
+                          "default": 30,
+                          "description": "Keep snapshots newer than this many days"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Cleanup completed",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "deletedCount": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Get File Content at Version",
+      "description": "Reconstruct and retrieve file content at a specific version",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/services/DeltaEngine/DeltaCompressor.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/content/:fileId": {
+            "get": {
+              "summary": "Get file content at specific version",
+              "parameters": [
+                {
+                  "name": "fileId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {"type": "string"}
+                },
+                {
+                  "name": "version",
+                  "in": "query",
+                  "schema": {"type": "integer", "description": "Version number, defaults to latest"}
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Content retrieved",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "content": {"type": "string"},
+                          "versionNumber": {"type": "integer"},
+                          "snapshot": {"$ref": "#/components/schemas/DeltaSnapshot"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Get Deltas Since Version",
+      "description": "Get all delta changes since a specific version number",
+      "files": [
+        "backend/routes/delta.js",
+        "backend/services/DeltaEngine/DeltaManager.js",
+        "backend/models/DeltaSnapshot.js"
+      ],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/delta/deltas-since/:fileId": {
+            "get": {
+              "summary": "Get deltas since version",
+              "parameters": [
+                {
+                  "name": "fileId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {"type": "string"}
+                },
+                {
+                  "name": "version",
+                  "in": "query",
+                  "required": true,
+                  "schema": {"type": "integer"}
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Deltas retrieved",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "deltas": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/DeltaSnapshot"}
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "DeltaSnapshot": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {"type": "string", "format": "uuid"},
+          "projectId": {"type": "string"},
+          "fileId": {"type": "string"},
+          "userId": {"type": "string"},
+          "versionNumber": {"type": "integer"},
+          "baseVersion": {"type": "integer"},
+          "delta": {
+            "type": "object",
+            "properties": {
+              "data": {"type": "string", "description": "Base64 encoded compressed delta"},
+              "format": {"type": "string", "enum": ["diff"]}
+            }
+          },
+          "checksum": {"type": "string", "description": "SHA256 hash of content"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "originalSize": {"type": "integer"},
+              "compressedSize": {"type": "integer"},
+              "compressionRatio": {"type": "number"},
+              "linesAdded": {"type": "integer"},
+              "linesRemoved": {"type": "integer"}
+            }
+          },
+          "trigger": {
+            "type": "string",
+            "enum": ["manual", "time", "edit-count", "idle", "cursor-jump", "focus-loss", "undo-redo", "batch"]
+          },
+          "fullSnapshot": {"type": "string", "description": "Full content for checkpoint versions"},
+          "message": {"type": "string"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "expiresAt": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "root",
+  "name": "root",
+  "type": "folder",
+  "children": [
+    {
+      "id": "src",
+      "name": "src",
+      "type": "folder",
+      "children": [
+        {
+          "id": "index.js",
+          "name": "index.js",
+          "type": "file",
+          "content": "// Start coding here\nconsole.log(\"Hello World!\");"
+        }
+      ]
+    },
+    {
+      "id": "readme.md",
+      "name": "README.md",
+      "type": "file",
+      "content": "# Welcome to your project\n\nStart building something amazing!"
+    }
+  ]
+}

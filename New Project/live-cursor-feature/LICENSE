@@ -1,0 +1,81 @@
+MIT License
+
+Copyright (c) 2025 Live Cursor Feature Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## About This License
+
+This is the MIT License, one of the most permissive open-source licenses.
+
+### What You CAN Do
+
+✅ **Commercial Use** - Use in commercial projects without restrictions
+✅ **Modification** - Modify the code as needed
+✅ **Distribution** - Distribute copies of the software
+✅ **Private Use** - Use privately in your company/organization
+✅ **Sublicensing** - Include in projects with different licenses
+
+### What You MUST Do
+
+📋 **Include License** - Include this license text in copies you distribute
+📋 **Include Copyright** - Keep the copyright notice
+
+### What You CANNOT Do
+
+❌ **Hold Liable** - Authors are not liable for damages
+❌ **Use Trademark** - No rights to use author names for promotion
+
+---
+
+## Attribution (Optional but Appreciated)
+
+While not required by this license, attribution is always appreciated:
+
+```
+This project uses the Live Cursor Feature
+Extracted from Collaborative Code Editor Project
+Licensed under MIT License
+```
+
+---
+
+## Third-Party Licenses
+
+This software depends on:
+
+- **Monaco Editor** (MIT License) - Microsoft Corporation
+- **Socket.IO** (MIT License) - Guillermo Rauch
+- **React** (MIT License, if using examples) - Meta Platforms, Inc.
+
+Please review their respective licenses when using this software.
+
+---
+
+**Questions about licensing?**
+
+This MIT License allows maximum flexibility. You can:
+- Use this in your SaaS product
+- Include in proprietary software
+- Resell as part of a larger solution
+- Modify and not share changes
+
+No strings attached! 🎉
