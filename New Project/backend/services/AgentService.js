@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { executionBlockedNotice } from '../config/execution.js';
 
 const execAsync = promisify(exec);
 
@@ -183,6 +184,13 @@ Create a detailed action plan to accomplish this task. Respond with ONLY valid J
       }
 
       case 'RUN_COMMAND': {
+        // Default-deny: the agent runs commands unsandboxed, so this stays off until M3.
+        const blocked = executionBlockedNotice();
+        if (blocked) {
+          this.log('warning', blocked.message);
+          return { success: false, blocked: true, command: target, message: blocked.message };
+        }
+
         // Execute command
         const { stdout, stderr } = await execAsync(target, { cwd: projectRoot });
         

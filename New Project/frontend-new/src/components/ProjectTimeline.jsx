@@ -48,16 +48,16 @@ const ActivityIcon = ({ type }) => {
 const getActivityColor = (type) => {
   const colors = {
     'user_joined': 'bg-green-500',
-    'user_left': 'bg-gray-500',
-    'file_created': 'bg-blue-500',
+    'user_left': 'bg-vscode-panel0',
+    'file_created': 'bg-amber-500',
     'file_edited': 'bg-yellow-500',
     'file_deleted': 'bg-red-500',
     'file_renamed': 'bg-purple-500',
-    'chat_message': 'bg-indigo-500',
+    'chat_message': 'bg-violet-500',
     'ai_interaction': 'bg-pink-500',
     'member_added': 'bg-green-500',
     'member_removed': 'bg-orange-500',
-    'project_created': 'bg-blue-600',
+    'project_created': 'bg-amber-600',
     'project_updated': 'bg-teal-500'
   };
   return colors[type] || 'bg-gray-400';
@@ -174,13 +174,13 @@ export default function ProjectTimeline({ projectId, socket }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="bg-vscode-panel rounded-lg shadow-sm border border-vscode-border">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200">
+      <div className="px-6 py-4 border-b border-vscode-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-gray-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Activity Timeline</h3>
+            <Clock className="w-5 h-5 text-vscode-textMuted" />
+            <h3 className="text-lg font-semibold text-vscode-text">Activity Timeline</h3>
           </div>
           
           {/* Filter */}
@@ -191,7 +191,7 @@ export default function ProjectTimeline({ projectId, socket }) {
               setPage(1);
               setActivities([]);
             }}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-3 py-1.5 border border-vscode-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-vscode-accent"
           >
             {filterOptions.map(option => (
               <option key={option.value} value={option.value}>
@@ -206,10 +206,10 @@ export default function ProjectTimeline({ projectId, socket }) {
       <div className="px-6 py-4">
         {loading && activities.length === 0 ? (
           <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-vscode-accent"></div>
           </div>
         ) : activities.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-vscode-textMuted">
             <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No activity yet</p>
           </div>
@@ -223,7 +223,7 @@ export default function ProjectTimeline({ projectId, socket }) {
                     <ActivityIcon type={activity.type} />
                   </div>
                   {index < activities.length - 1 && (
-                    <div className="w-0.5 flex-1 bg-gray-200 mt-2" />
+                    <div className="w-0.5 flex-1 bg-vscode-border mt-2" />
                   )}
                 </div>
 
@@ -239,22 +239,22 @@ export default function ProjectTimeline({ projectId, socket }) {
                             className="w-6 h-6 rounded-full"
                           />
                         ) : (
-                          <div className="w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-xs text-gray-600">
+                          <div className="w-6 h-6 rounded-full bg-vscode-hover flex items-center justify-center text-xs text-vscode-textMuted">
                             {activity.userId?.username?.[0]?.toUpperCase()}
                           </div>
                         )}
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-vscode-text">
                           {activity.userId?.username || 'Unknown User'}
                         </span>
                       </div>
                       
-                      <p className="text-sm text-gray-700 mt-1">
+                      <p className="text-sm text-vscode-textMuted mt-1">
                         {activity.action}
                       </p>
                       
                       {/* Metadata */}
                       {activity.metadata && (
-                        <div className="mt-2 text-xs text-gray-500 space-y-1">
+                        <div className="mt-2 text-xs text-vscode-textMuted space-y-1">
                           {activity.metadata.fileName && (
                             <div className="flex items-center gap-1">
                               <FileText className="w-3 h-3" />
@@ -262,7 +262,7 @@ export default function ProjectTimeline({ projectId, socket }) {
                             </div>
                           )}
                           {activity.metadata.message && (
-                            <div className="bg-gray-50 rounded p-2 italic">
+                            <div className="bg-vscode-panel rounded p-2 italic">
                               "{activity.metadata.message.substring(0, 100)}{activity.metadata.message.length > 100 ? '...' : ''}"
                             </div>
                           )}
@@ -273,7 +273,7 @@ export default function ProjectTimeline({ projectId, socket }) {
                       )}
                     </div>
 
-                    <span className="text-xs text-gray-500 ml-4 whitespace-nowrap">
+                    <span className="text-xs text-vscode-textMuted ml-4 whitespace-nowrap">
                       {formatTimestamp(activity.timestamp)}
                     </span>
                   </div>
@@ -287,7 +287,7 @@ export default function ProjectTimeline({ projectId, socket }) {
                 <button
                   onClick={loadMore}
                   disabled={loading}
-                  className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                  className="px-4 py-2 text-sm text-vscode-accent hover:text-vscode-accentHover hover:bg-vscode-hover rounded-lg transition-colors disabled:opacity-50"
                 >
                   {loading ? 'Loading...' : 'Load More'}
                 </button>

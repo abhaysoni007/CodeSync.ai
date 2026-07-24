@@ -14,14 +14,14 @@ const ChatMessage = ({ message }) => {
     if (isUser) return <FiUser className="w-4 h-4" />;
     if (isError) return <FiAlertCircle className="w-4 h-4 text-red-400" />;
     if (isAgent) return <FiCheckCircle className="w-4 h-4 text-green-400" />;
-    return <FiCpu className="w-4 h-4 text-blue-400" />;
+    return <FiCpu className="w-4 h-4 text-vscode-accent" />;
   };
 
   const getBgColor = () => {
-    if (isUser) return 'bg-[#2d2d30]';
+    if (isUser) return 'bg-[#1C2027]';
     if (isError) return 'bg-red-900/20 border border-red-900/50';
     if (isAgent) return 'bg-green-900/20 border border-green-900/50';
-    return 'bg-[#1e1e1e] border border-[#3c3c3c]';
+    return 'bg-[#0D0F12] border border-[#292E38]';
   };
 
   return (
@@ -61,7 +61,7 @@ const ChatMessage = ({ message }) => {
                         {String(children).replace(/\n$/, '')}
                       </SyntaxHighlighter>
                     ) : (
-                      <code className="bg-[#2d2d30] px-1.5 py-0.5 rounded text-sm text-blue-300" {...props}>
+                      <code className="bg-[#1C2027] px-1.5 py-0.5 rounded text-sm text-vscode-accent" {...props}>
                         {children}
                       </code>
                     );
@@ -82,7 +82,7 @@ const ChatMessage = ({ message }) => {
 
           {/* Metadata */}
           {message.metadata && (
-            <div className="mt-3 pt-3 border-t border-[#3c3c3c] text-xs text-gray-500">
+            <div className="mt-3 pt-3 border-t border-[#292E38] text-xs text-gray-500">
               {message.metadata.filesCreated && (
                 <div className="mb-1">
                   <span className="font-semibold">Files Created:</span>{' '}

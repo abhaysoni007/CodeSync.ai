@@ -85,12 +85,7 @@ export const api = {
   joinRoom: (id) => apiClient.post(`/rooms/${id}/join`),
   leaveRoom: (id) => apiClient.post(`/rooms/${id}/leave`),
 
-  // Files
-  getFiles: (projectId) => apiClient.get(`/projects/${projectId}/files`),
-  createFile: (projectId, data) => apiClient.post(`/projects/${projectId}/files`, data),
-  getFile: (id) => apiClient.get(`/files/${id}`),
-  updateFile: (id, data) => apiClient.put(`/files/${id}`, data),
-  deleteFile: (id) => apiClient.delete(`/files/${id}`),
+  // Files are served by /api/filesystem/* — see services/fileAPI.js (single file backend).
 
   // Messages
   getMessages: (roomId, params) => apiClient.get(`/rooms/${roomId}/messages`, { params }),

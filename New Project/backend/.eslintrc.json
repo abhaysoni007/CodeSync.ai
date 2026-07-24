@@ -1,0 +1,16 @@
+{
+  "root": true,
+  "env": { "node": true, "es2022": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+  "extends": ["eslint:recommended", "prettier"],
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-empty": "warn",
+    "no-case-declarations": "warn",
+    "no-constant-condition": "warn",
+    "no-useless-escape": "warn",
+    "no-prototype-builtins": "warn",
+    "no-console": "off"
+  },
+  "ignorePatterns": ["node_modules", "coverage", "projects", "uploads"]
+}

@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { executionBlockedNotice } from '../config/execution.js';
 
 // Store active terminal sessions per socket
 const terminalSessions = new Map();
@@ -65,6 +66,13 @@ export const setupTerminalSockets = (io) => {
      */
     socket.on('terminal:execute', async ({ terminalId, projectId, command }) => {
       try {
+        // Default-deny: execution is unsandboxed today, so it stays off until M3 (see config/execution.js).
+        const blocked = executionBlockedNotice();
+        if (blocked) {
+          socket.emit('terminal:error', { terminalId, error: blocked.message });
+          return;
+        }
+
         console.log(`[Terminal] Executing command in ${terminalId}: ${command}`);
 
         const session = terminalSessions.get(terminalId);
@@ -200,6 +208,13 @@ export const setupTerminalSockets = (io) => {
      */
     socket.on('terminal:run-file', async ({ projectId, command, fileName, filePath }) => {
       try {
+        // Default-deny: execution is unsandboxed today, so it stays off until M3 (see config/execution.js).
+        const blocked = executionBlockedNotice();
+        if (blocked) {
+          socket.emit('terminal:error', { error: blocked.message });
+          return;
+        }
+
         console.log(`[Terminal] Running file: ${fileName} with command: ${command}`);
         console.log(`[Terminal] File path: ${filePath}`);
 

@@ -11,7 +11,7 @@ const Features = () => {
       icon: <FaUsers className="text-4xl" />,
       title: 'Real-Time Collaboration',
       description: 'Edit code live with teammates. See changes instantly with cursor tracking and real-time synchronization.',
-      color: 'from-cyan-500 to-blue-500',
+      color: 'from-amber-500 to-orange-500',
     },
     {
       icon: <FaRobot className="text-4xl" />,

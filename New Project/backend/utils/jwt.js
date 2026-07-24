@@ -1,10 +1,14 @@
 import jwt from 'jsonwebtoken';
+import { requireEnv } from '../config/env.js';
 
 /**
  * JWT Utilities for authentication
  */
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+// WHY: read the secret at call-time, not import-time. There is no hardcoded fallback (a
+// well-known default makes every token forgeable), and reading lazily avoids the trap where
+// this module is imported before dotenv.config() runs, which would otherwise capture undefined.
+const getSecret = () => requireEnv('JWT_SECRET');
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '30d';
 
@@ -14,7 +18,7 @@ const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '30d';
  * @returns {string} - JWT token
  */
 export const generateToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, {
+  return jwt.sign(payload, getSecret(), {
     expiresIn: JWT_EXPIRES_IN
   });
 };
@@ -25,7 +29,7 @@ export const generateToken = (payload) => {
  * @returns {string} - JWT refresh token
  */
 export const generateRefreshToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, {
+  return jwt.sign(payload, getSecret(), {
     expiresIn: REFRESH_TOKEN_EXPIRES_IN
   });
 };
@@ -37,7 +41,7 @@ export const generateRefreshToken = (payload) => {
  */
 export const verifyToken = (token) => {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, getSecret());
   } catch (error) {
     throw new Error('Invalid or expired token');
   }

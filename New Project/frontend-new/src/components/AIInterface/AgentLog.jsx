@@ -14,7 +14,7 @@ const AgentLog = ({ log }) => {
       case 'terminal':
         return <FiTerminal className="w-3 h-3 text-purple-400" />;
       default:
-        return <FiInfo className="w-3 h-3 text-blue-400" />;
+        return <FiInfo className="w-3 h-3 text-vscode-accent" />;
     }
   };
 
@@ -29,7 +29,7 @@ const AgentLog = ({ log }) => {
       case 'terminal':
         return 'bg-purple-900/20 border-purple-900/50';
       default:
-        return 'bg-blue-900/20 border-blue-900/50';
+        return 'bg-vscode-accent/10 border-vscode-accent/30';
     }
   };
 

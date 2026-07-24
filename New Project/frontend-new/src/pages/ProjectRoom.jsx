@@ -2,20 +2,21 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import { api } from '../utils/api';
+import * as fileAPI from '../services/fileAPI';
+import { makeActiveFile } from '../utils/fileIdentity';
 import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import ProjectTimeline from '../components/ProjectTimeline';
 import FileExplorer from '../components/FileExplorer';
+import ActivityBar from '../components/ActivityBar';
+import ExtensionsPanel from '../components/ExtensionsPanel';
 import VideoChatPanel from '../components/VideoChatPanel';
 import TerminalPanel from '../components/TerminalPanel';
 import AIToggleButton from '../components/AIInterface/AIToggleButton';
 import AIInterface from '../components/AIInterface';
 import '../components/FileExplorer.css';
 import './ProjectRoom.css';
-import { useDeltaSync } from '../hooks/useDeltaSync';
-import VersionHistoryPanel from '../components/DeltaEngine/VersionHistoryPanel';
-import DeltaSyncStatus from '../components/DeltaEngine/DeltaSyncStatus';
 import {
   FolderOpen,
   FileText,
@@ -47,7 +48,7 @@ const ProjectRoom = () => {
   const navigate = useNavigate();
   const { user } = useUser();
   const [project, setProject] = useState(null);
-  const [files, setFiles] = useState([]);
+  const [sidebarView, setSidebarView] = useState('explorer');
   const [activeFile, setActiveFile] = useState(null);
   const [code, setCode] = useState('');
   const [messages, setMessages] = useState([]);
@@ -75,20 +76,6 @@ const ProjectRoom = () => {
   const decorationsRef = useRef({});
   const cursorTimeoutsRef = useRef({});
   const isRemoteUpdateRef = useRef(false);
-
-  // Delta Engine Integration (DISABLED FOR NOW - needs backend setup)
-  // Uncomment when backend delta routes are ready
-  /*
-  const {
-    sendDelta,
-    saveSnapshot,
-    rollbackToSnapshot,
-    getVersionHistory,
-    isInitialized,
-    isSyncing,
-    isSynced,
-  } = useDeltaSync(id, activeFile?._id, code);
-  */
 
   // Socket.IO connection
   useEffect(() => {
@@ -226,20 +213,14 @@ const ProjectRoom = () => {
       setOnlineUsers(users);
     });
 
-    socketRef.current.on('file-created', (file) => {
-      console.log('File created:', file);
-      setFiles(prev => [...prev, file]);
-      toast.success(`${file.name} created`);
-    });
-
-    socketRef.current.on('file-deleted', (fileId) => {
-      console.log('File deleted:', fileId);
-      setFiles(prev => prev.filter(f => f._id !== fileId));
-      if (activeFile?._id === fileId) {
+    // File create/delete/rename are handled by the FileExplorer via the filesystem:* events
+    // (see useFileExplorer). ProjectRoom only reacts by clearing the editor if the open file
+    // is deleted out from under it.
+    socketRef.current.on('filesystem:deleted', ({ path }) => {
+      if (activeFile?.path && path?.join('/') === activeFile.path.join('/')) {
         setActiveFile(null);
         setCode('');
       }
-      toast.success('File deleted');
     });
 
     socketRef.current.on('user-joined', (userData) => {
@@ -262,7 +243,6 @@ const ProjectRoom = () => {
   // Load project data
   useEffect(() => {
     loadProject();
-    loadFiles();
     loadMessages();
   }, [id]);
 
@@ -274,16 +254,6 @@ const ProjectRoom = () => {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
       navigate('/dashboard');
-    }
-  };
-
-  const loadFiles = async () => {
-    try {
-      const response = await api.getFiles(id);
-      setFiles(response.data.data.files || []);
-    } catch (error) {
-      console.error('Failed to load files:', error);
-      setFiles([]);
     }
   };
 
@@ -306,12 +276,7 @@ const ProjectRoom = () => {
     }
     
     setCode(value);
-    
-    // Delta Engine integration (disabled for now)
-    // if (activeFile && isInitialized) {
-    //   sendDelta(value);
-    // }
-    
+
     // Emit code update to other users via Socket.IO
     if (socketRef.current && activeFile) {
       socketRef.current.emit('code-update', {
@@ -463,12 +428,19 @@ const ProjectRoom = () => {
   }, [onlineUsers, user]);
 
   const handleSaveFile = async () => {
-    if (!activeFile) return;
+    if (!activeFile?.path) return;
 
     try {
-      // Use virtual filesystem API for virtual files
-      // Delta Engine integration coming soon
-      toast.success('File saved successfully (auto-sync enabled)');
+      // Persist through the single filesystem backend, then tell peers to refresh this file.
+      await fileAPI.updateFileContent(id, { path: activeFile.path, content: code });
+      if (socketRef.current) {
+        socketRef.current.emit('filesystem:file-updated', {
+          projectId: id,
+          path: activeFile.path,
+          content: code,
+        });
+      }
+      toast.success('File saved');
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error('Failed to save file');
@@ -529,65 +501,22 @@ const ProjectRoom = () => {
     }
   };
 
-  const handleCreateFile = async () => {
-    const fileName = prompt('Enter file name:');
-    if (!fileName) return;
+  // Open a file selected in the FileExplorer tree. Identity is the tree path (see fileIdentity.js);
+  // content is fetched fresh from the single filesystem backend so we never show a stale tree copy.
+  const openFile = async (node, path) => {
+    if (node.type !== 'file') return;
+
+    const next = makeActiveFile(node, path);
+    setActiveFile(next);
+    setCode(next.content);
 
     try {
-      const response = await api.createFile(id, {
-        name: fileName,
-        content: '',
-        type: 'file',
-      });
-      
-      const newFile = response.data.data.file;
-      setFiles(prev => [...prev, newFile]);
-      setActiveFile(newFile);
-      setCode('');
-      
-      if (socketRef.current) {
-        socketRef.current.emit('file-created', { projectId: id, file: newFile });
+      const res = await fileAPI.getFileContent(id, path);
+      if (res?.success) {
+        setCode(res.data?.content ?? '');
       }
-      
-      toast.success('File created successfully');
-    } catch (error) {
-      console.error('Failed to create file:', error);
-      toast.error('Failed to create file');
-    }
-  };
-
-  const handleDeleteFile = async (fileId) => {
-    if (!confirm('Are you sure you want to delete this file?')) return;
-
-    try {
-      await api.deleteFile(fileId);
-      setFiles(prev => prev.filter(f => f._id !== fileId));
-      
-      if (activeFile?._id === fileId) {
-        setActiveFile(null);
-        setCode('');
-      }
-      
-      if (socketRef.current) {
-        socketRef.current.emit('file-deleted', { projectId: id, fileId });
-      }
-      
-      toast.success('File deleted successfully');
-    } catch (error) {
-      console.error('Failed to delete file:', error);
-      toast.error('Failed to delete file');
-    }
-  };
-
-  const handleFileClick = async (file) => {
-    setActiveFile(file);
-    
-    try {
-      const response = await api.getFile(file._id);
-      setCode(response.data.data.file.content || '');
     } catch (error) {
       console.error('Failed to load file content:', error);
-      setCode('');
     }
   };
 
@@ -720,31 +649,20 @@ const ProjectRoom = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - File Explorer */}
+        {/* Activity Bar - switches the sidebar between Explorer and Extensions */}
+        <ActivityBar active={sidebarView} onChange={setSidebarView} />
+
+        {/* Left Sidebar */}
         <aside className="w-64 bg-vscode-panel border-r border-vscode-border flex flex-col">
-          <FileExplorer
-            projectId={id}
-            socket={socketRef.current}
-            onFileSelect={(node, path) => {
-              if (node.type === 'file') {
-                // Find or create file in your files array
-                const existingFile = files.find(f => f.name === node.name);
-                if (existingFile) {
-                  handleFileClick(existingFile);
-                } else {
-                  // Create a temporary file object to display in editor
-                  const tempFile = {
-                    _id: node.id,
-                    name: node.name,
-                    content: node.content || '',
-                    language: getFileLanguage(node.name)
-                  };
-                  setActiveFile(tempFile);
-                  setCode(node.content || '');
-                }
-              }
-            }}
-          />
+          {sidebarView === 'explorer' ? (
+            <FileExplorer
+              projectId={id}
+              socket={socketRef.current}
+              onFileSelect={openFile}
+            />
+          ) : (
+            <ExtensionsPanel />
+          )}
         </aside>
 
         {/* Center - Monaco Editor */}
@@ -786,6 +704,38 @@ const ProjectRoom = () => {
                   language={getFileLanguage(activeFile.name)}
                   value={code}
                   onChange={handleEditorChange}
+                  beforeMount={(monaco) => {
+                    // Custom theme matching the app palette — vs-dark's default blue selection/
+                    // cursor would clash with the amber accent used everywhere else.
+                    monaco.editor.defineTheme('codesync-dark', {
+                      base: 'vs-dark',
+                      inherit: true,
+                      rules: [
+                        { token: 'comment', foreground: '6B7280', fontStyle: 'italic' },
+                        { token: 'keyword', foreground: 'E8A855' },
+                        { token: 'string', foreground: '9ECE6A' },
+                        { token: 'number', foreground: 'F0BE7A' },
+                      ],
+                      colors: {
+                        'editor.background': '#0D0F12',
+                        'editor.foreground': '#F4F4F5',
+                        'editorLineNumber.foreground': '#4B5563',
+                        'editorLineNumber.activeForeground': '#E8A855',
+                        'editor.selectionBackground': '#3A2A1466',
+                        'editor.inactiveSelectionBackground': '#3A2A1433',
+                        'editorCursor.foreground': '#E8A855',
+                        'editor.lineHighlightBackground': '#1C202766',
+                        'editorIndentGuide.background': '#292E38',
+                        'editorIndentGuide.activeBackground': '#4B5563',
+                        'editorWidget.background': '#1C2027',
+                        'editorWidget.border': '#292E38',
+                        'editorSuggestWidget.background': '#1C2027',
+                        'editorSuggestWidget.selectedBackground': '#3A2A14',
+                        'scrollbarSlider.background': '#29303840',
+                        'scrollbarSlider.hoverBackground': '#E8A85540',
+                      },
+                    });
+                  }}
                   onMount={(editor, monaco) => {
                     editorRef.current = editor;
                     monacoRef.current = monaco;
@@ -822,10 +772,12 @@ const ProjectRoom = () => {
                     // Focus editor on mount
                     editor.focus();
                   }}
-                  theme="vs-dark"
+                  theme="codesync-dark"
                   options={{
                     minimap: { enabled: true },
                     fontSize: 14,
+                    fontFamily: '"JetBrains Mono", Consolas, Monaco, monospace',
+                    fontLigatures: true,
                     lineNumbers: 'on',
                     roundedSelection: false,
                     scrollBeyondLastLine: false,
@@ -863,8 +815,6 @@ const ProjectRoom = () => {
                       Connected
                     </span>
                   )}
-                  {/* Delta Sync Status (disabled for now) */}
-                  {/* activeFile && <DeltaSyncStatus fileId={activeFile._id} /> */}
                 </div>
                 <div className="flex items-center gap-2">
                   {Object.keys(cursors).length > 0 && (
@@ -912,34 +862,6 @@ const ProjectRoom = () => {
           unreadMessages={unreadMessages}
         />
 
-        {/* Version History Panel (disabled for now - needs backend setup) */}
-        {/*
-        {showVersionHistory && activeFile && (
-          <aside className="w-96 bg-vscode-panel border-l border-vscode-border flex flex-col">
-            <div className="p-4 border-b border-vscode-border flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-vscode-accent" />
-                <h2 className="font-semibold text-white">Version History</h2>
-              </div>
-              <button
-                onClick={() => setShowVersionHistory(false)}
-                className="p-1 hover:bg-vscode-bg rounded transition-colors"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <VersionHistoryPanel
-                fileId={activeFile._id}
-                onRestore={(version) => {
-                  rollbackToSnapshot(version.snapshotId);
-                  toast.success(`Restored to version ${version.versionNumber}`);
-                }}
-              />
-            </div>
-          </aside>
-        )}
-        */}
       </div>
 
       {/* Activity Timeline Panel */}
