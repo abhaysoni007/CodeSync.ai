@@ -63,12 +63,12 @@ const AIPanel = ({ onClose }) => {
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 400, opacity: 0 }}
       transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-      className={`fixed right-0 top-0 h-screen bg-[#1e1e1e] border-l border-[#3c3c3c] shadow-2xl z-50 flex flex-col ${
+      className={`fixed right-0 top-0 h-screen bg-[#0D0F12] border-l border-[#292E38] shadow-2xl z-50 flex flex-col ${
         isMaximized ? 'w-full' : 'w-[500px]'
       }`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#3c3c3c] bg-[#252526]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#292E38] bg-[#15181D]">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           <h2 className="text-lg font-semibold text-white">
@@ -82,21 +82,21 @@ const AIPanel = ({ onClose }) => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowHistory(!showHistory)}
-            className="p-2 hover:bg-[#2d2d30] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
             title="History"
           >
             <FiClock className="w-4 h-4 text-gray-400" />
           </button>
           <button
             onClick={clearMessages}
-            className="p-2 hover:bg-[#2d2d30] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
             title="Clear Chat"
           >
             <FiTrash2 className="w-4 h-4 text-gray-400" />
           </button>
           <button
             onClick={() => setIsMaximized(!isMaximized)}
-            className="p-2 hover:bg-[#2d2d30] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
           >
             {isMaximized ? (
               <FiMinimize2 className="w-4 h-4 text-gray-400" />
@@ -106,7 +106,7 @@ const AIPanel = ({ onClose }) => {
           </button>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-[#2d2d30] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
           >
             <FiX className="w-5 h-5 text-gray-400" />
           </button>
@@ -114,7 +114,7 @@ const AIPanel = ({ onClose }) => {
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
+      <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0D0F12]">
         {showHistory ? (
           <HistoryTab history={history} onClose={() => setShowHistory(false)} />
         ) : (
@@ -137,19 +137,19 @@ const AIPanel = ({ onClose }) => {
                   <div className="space-y-2">
                     {mode === 'ask' ? (
                       <>
-                        <div className="bg-[#2d2d30] p-2 rounded text-sm text-gray-300">
+                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
                           "How do I create a React hook?"
                         </div>
-                        <div className="bg-[#2d2d30] p-2 rounded text-sm text-gray-300">
+                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
                           "Explain async/await in JavaScript"
                         </div>
                       </>
                     ) : (
                       <>
-                        <div className="bg-[#2d2d30] p-2 rounded text-sm text-gray-300">
+                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
                           "Create a landing page with hero section"
                         </div>
-                        <div className="bg-[#2d2d30] p-2 rounded text-sm text-gray-300">
+                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
                           "Generate a login form component"
                         </div>
                       </>
@@ -188,9 +188,9 @@ const AIPanel = ({ onClose }) => {
                 {isLoading && (
                   <div className="flex items-center gap-2 text-gray-400">
                     <div className="flex gap-1">
-                      <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                     <span className="text-sm">
                       {mode === 'ask' ? 'Thinking...' : 'Agent working...'}

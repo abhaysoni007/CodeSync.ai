@@ -7,8 +7,13 @@ import {
   getFileContent,
   updateFileContent
 } from '../controllers/FileSystemController.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// WHY: this router had no auth — any request could read/write another project's files.
+// Require a valid session for every filesystem operation.
+router.use(authenticate);
 
 /**
  * @route   GET /api/filesystem/:projectId

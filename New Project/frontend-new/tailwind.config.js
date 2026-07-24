@@ -8,25 +8,28 @@ export default {
   theme: {
     extend: {
       colors: {
-        // VS Code Dark Theme Colors
+        // Premium dark theme — no blue family. Amber accent on a graphite-black neutral scale.
+        // Keeping the `vscode` key name: every component already references bg-vscode-*,
+        // text-vscode-*, border-vscode-* — repointing values here reskins the whole app.
         vscode: {
-          bg: '#1e1e1e',
-          sidebar: '#252526',
-          panel: '#2d2d30',
-          border: '#3c3c3c',
-          hover: '#37373d',
-          active: '#094771',
-          text: '#cccccc',
-          textMuted: '#858585',
-          accent: '#007acc',
-          error: '#f48771',
-          success: '#89d185',
-          warning: '#dcdcaa',
+          bg: '#0D0F12',
+          sidebar: '#15181D',
+          panel: '#1C2027',
+          border: '#292E38',
+          hover: '#20242C',
+          active: '#3A2A14',
+          text: '#F4F4F5',
+          textMuted: '#A1A1AA',
+          accent: '#E8A855',
+          accentHover: '#F0BE7A',
+          error: '#F87171',
+          success: '#22C55E',
+          warning: '#FBBF24',
         },
       },
       fontFamily: {
-        mono: ['Consolas', 'Monaco', 'Courier New', 'monospace'],
-        sans: ['Segoe UI', 'Tahoma', 'Geneva', 'Verdana', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'Consolas', 'Monaco', 'monospace'],
+        sans: ['"Inter"', 'Segoe UI', 'Tahoma', 'sans-serif'],
       },
       animation: {
         'fade-in': 'fadeIn 0.2s ease-in-out',

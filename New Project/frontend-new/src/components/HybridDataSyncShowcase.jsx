@@ -47,7 +47,7 @@ const HybridDataSyncShowcase = () => {
           <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       ),
-      gradient: 'from-cyan-500 to-blue-600',
+      gradient: 'from-amber-500 to-orange-600',
     },
     {
       title: 'Instant Conflict Resolution',

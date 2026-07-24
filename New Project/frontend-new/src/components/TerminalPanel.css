@@ -20,7 +20,7 @@
 
 /* xterm Container */
 .xterm-container {
-  background-color: #1e1e1e;
+  background-color: #0D0F12;
   overflow: hidden;
 }
 
@@ -30,7 +30,7 @@
 }
 
 .xterm-viewport {
-  background-color: #1e1e1e !important;
+  background-color: #0D0F12 !important;
   overflow-y: auto;
 }
 
@@ -39,16 +39,16 @@
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: #0D0F12;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: #292E38;
   border-radius: 6px;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: #4e4e4e;
+  background: #20242C;
 }
 
 /* xterm Screen */
@@ -65,8 +65,8 @@
 
 /* Cursor */
 .xterm .xterm-cursor {
-  background-color: #d4d4d4 !important;
-  color: #1e1e1e !important;
+  background-color: #F4F4F5 !important;
+  color: #0D0F12 !important;
 }
 
 .xterm.focus .xterm-cursor {
@@ -170,35 +170,35 @@
 
 /* Custom Prompt Styling */
 .xterm-link-layer a {
-  color: #4e94ce !important;
+  color: #E8A855 !important;
   text-decoration: underline;
 }
 
 .xterm-link-layer a:hover {
-  color: #6cb6ff !important;
+  color: #F0BE7A !important;
 }
 
 /* Error Text */
 .xterm-error-text {
-  color: #f48771 !important;
+  color: #F87171 !important;
   font-weight: 500;
 }
 
 /* Success Text */
 .xterm-success-text {
-  color: #89d185 !important;
+  color: #22C55E !important;
   font-weight: 500;
 }
 
 /* Warning Text */
 .xterm-warning-text {
-  color: #e5e510 !important;
+  color: #FBBF24 !important;
   font-weight: 500;
 }
 
 /* Command Input Line */
 .xterm-prompt {
-  color: #4e94ce;
+  color: #E8A855;
   font-weight: 600;
 }
 
@@ -226,7 +226,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #858585;
+  color: #A1A1AA;
 }
 
 .terminal-loading::after {
@@ -235,7 +235,7 @@
   width: 20px;
   height: 20px;
   margin-left: 10px;
-  border: 2px solid #858585;
+  border: 2px solid #A1A1AA;
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -284,13 +284,13 @@
 
 /* Dark Mode Overrides */
 .dark .terminal-panel {
-  background-color: #1e1e1e;
-  border-color: #3c3c3c;
+  background-color: #0D0F12;
+  border-color: #292E38;
 }
 
 .dark .terminal-header {
-  background-color: #252526;
-  border-color: #3c3c3c;
+  background-color: #15181D;
+  border-color: #292E38;
 }
 
 /* Light Mode (if needed) */
@@ -335,7 +335,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #858585;
+  background: #A1A1AA;
   margin-right: 6px;
 }
 
@@ -345,7 +345,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #89d185;
+  background: #22C55E;
   margin-right: 6px;
   animation: pulse 1s ease-in-out infinite;
 }
@@ -356,6 +356,6 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f48771;
+  background: #F87171;
   margin-right: 6px;
 }

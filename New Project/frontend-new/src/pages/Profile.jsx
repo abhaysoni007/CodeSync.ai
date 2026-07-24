@@ -205,21 +205,21 @@ const Profile = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#1e1e1e] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      <div className="min-h-screen bg-[#0D0F12] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-vscode-accent animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#1e1e1e] text-[#d4d4d4]">
+    <div className="min-h-screen bg-[#0D0F12] text-[#F4F4F5]">
       {/* Header */}
-      <div className="bg-[#252526] border-b border-[#3e3e42] px-6 py-4">
+      <div className="bg-[#15181D] border-b border-[#292E38] px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
               onClick={() => navigate('/dashboard')}
-              className="p-2 hover:bg-[#2a2d2e] rounded-lg transition-colors"
+              className="p-2 hover:bg-[#20242C] rounded-lg transition-colors"
               title="Back to Dashboard"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -251,13 +251,13 @@ const Profile = () => {
         )}
 
         {/* Tabs */}
-        <div className="flex space-x-1 mb-6 bg-[#252526] p-1 rounded-lg">
+        <div className="flex space-x-1 mb-6 bg-[#15181D] p-1 rounded-lg">
           <button
             onClick={() => setActiveTab('profile')}
             className={`flex-1 px-4 py-2 rounded-md transition-colors ${
               activeTab === 'profile'
-                ? 'bg-[#007acc] text-white'
-                : 'text-[#cccccc] hover:bg-[#2a2d2e]'
+                ? 'bg-[#E8A855] text-[#14110A]'
+                : 'text-[#F4F4F5] hover:bg-[#20242C]'
             }`}
           >
             <User className="w-4 h-4 inline-block mr-2" />
@@ -267,8 +267,8 @@ const Profile = () => {
             onClick={() => setActiveTab('api-keys')}
             className={`flex-1 px-4 py-2 rounded-md transition-colors ${
               activeTab === 'api-keys'
-                ? 'bg-[#007acc] text-white'
-                : 'text-[#cccccc] hover:bg-[#2a2d2e]'
+                ? 'bg-[#E8A855] text-[#14110A]'
+                : 'text-[#F4F4F5] hover:bg-[#20242C]'
             }`}
           >
             <Key className="w-4 h-4 inline-block mr-2" />
@@ -278,7 +278,7 @@ const Profile = () => {
 
         {/* Profile Tab */}
         {activeTab === 'profile' && (
-          <div className="bg-[#252526] rounded-lg p-6 border border-[#3e3e42]">
+          <div className="bg-[#15181D] rounded-lg p-6 border border-[#292E38]">
             <h2 className="text-xl font-semibold mb-6">Personal Information</h2>
             
             <form onSubmit={handleProfileUpdate}>
@@ -291,26 +291,26 @@ const Profile = () => {
                       <img
                         src={avatarPreview}
                         alt="Avatar"
-                        className="w-24 h-24 rounded-full object-cover border-2 border-[#3e3e42]"
+                        className="w-24 h-24 rounded-full object-cover border-2 border-[#292E38]"
                       />
                     ) : (
-                      <div className="w-24 h-24 rounded-full bg-[#2a2d2e] flex items-center justify-center border-2 border-[#3e3e42]">
-                        <User className="w-12 h-12 text-[#858585]" />
+                      <div className="w-24 h-24 rounded-full bg-[#20242C] flex items-center justify-center border-2 border-[#292E38]">
+                        <User className="w-12 h-12 text-[#A1A1AA]" />
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="absolute bottom-0 right-0 p-2 bg-blue-500 hover:bg-blue-600 rounded-full transition-colors"
+                      className="absolute bottom-0 right-0 p-2 bg-vscode-accent hover:bg-vscode-accentHover rounded-full transition-colors"
                     >
                       <Camera className="w-4 h-4 text-white" />
                     </button>
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm text-[#858585] mb-2">
+                    <p className="text-sm text-[#A1A1AA] mb-2">
                       Upload a profile picture. Max size: 5MB
                     </p>
-                    <p className="text-xs text-[#858585]">
+                    <p className="text-xs text-[#A1A1AA]">
                       Allowed formats: JPEG, PNG, GIF, WebP
                     </p>
                   </div>
@@ -334,7 +334,7 @@ const Profile = () => {
                   type="text"
                   value={user?.username || ''}
                   disabled
-                  className="w-full px-4 py-2 bg-[#3c3c3c] border border-[#3e3e42] rounded-lg text-[#858585] cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-[#292E38] border border-[#292E38] rounded-lg text-[#A1A1AA] cursor-not-allowed"
                 />
               </div>
 
@@ -348,7 +348,7 @@ const Profile = () => {
                   type="email"
                   value={user?.email || ''}
                   disabled
-                  className="w-full px-4 py-2 bg-[#3c3c3c] border border-[#3e3e42] rounded-lg text-[#858585] cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-[#292E38] border border-[#292E38] rounded-lg text-[#A1A1AA] cursor-not-allowed"
                 />
               </div>
 
@@ -362,7 +362,7 @@ const Profile = () => {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Enter your full name"
-                  className="w-full px-4 py-2 bg-[#3c3c3c] border border-[#3e3e42] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-[#cccccc]"
+                  className="w-full px-4 py-2 bg-[#292E38] border border-[#292E38] rounded-lg focus:outline-none focus:ring-2 focus:ring-vscode-accent text-[#F4F4F5]"
                 />
               </div>
 
@@ -371,7 +371,7 @@ const Profile = () => {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center space-x-2"
+                  className="px-6 py-2 bg-vscode-accent hover:bg-vscode-accentHover disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center space-x-2"
                 >
                   {saving ? (
                     <>
@@ -392,9 +392,9 @@ const Profile = () => {
 
         {/* API Keys Tab */}
         {activeTab === 'api-keys' && (
-          <div className="bg-[#252526] rounded-lg p-6 border border-[#3e3e42]">
+          <div className="bg-[#15181D] rounded-lg p-6 border border-[#292E38]">
             <h2 className="text-xl font-semibold mb-2">Gemini API Key</h2>
-            <p className="text-sm text-[#858585] mb-6">
+            <p className="text-sm text-[#A1A1AA] mb-6">
               Configure your Gemini API key. Get it for free from Google AI Studio. The key is encrypted and stored securely.
             </p>
 
@@ -402,11 +402,11 @@ const Profile = () => {
               {API_PROVIDERS.map((provider) => (
                 <div
                   key={provider.id}
-                  className="border border-[#3e3e42] rounded-lg p-4 hover:border-[#525252] transition-colors"
+                  className="border border-[#292E38] rounded-lg p-4 hover:border-[#3A3F4A] transition-colors"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
-                      <Key className="w-4 h-4 text-blue-400" />
+                      <Key className="w-4 h-4 text-vscode-accent" />
                       <h3 className="font-medium">{provider.name}</h3>
                     </div>
                     {savedKeys[provider.id] && (
@@ -424,12 +424,12 @@ const Profile = () => {
                         value={apiKeys[provider.id] || ''}
                         onChange={(e) => setApiKeys(prev => ({ ...prev, [provider.id]: e.target.value }))}
                         placeholder={provider.placeholder}
-                        className="w-full px-4 py-2 bg-[#3c3c3c] border border-[#3e3e42] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-[#cccccc] pr-10"
+                        className="w-full px-4 py-2 bg-[#292E38] border border-[#292E38] rounded-lg focus:outline-none focus:ring-2 focus:ring-vscode-accent text-[#F4F4F5] pr-10"
                       />
                       <button
                         type="button"
                         onClick={() => toggleKeyVisibility(provider.id)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#858585] hover:text-[#cccccc]"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#A1A1AA] hover:text-[#F4F4F5]"
                       >
                         {showKeys[provider.id] ? (
                           <EyeOff className="w-4 h-4" />
@@ -443,7 +443,7 @@ const Profile = () => {
                       type="button"
                       onClick={() => handleAPIKeyUpdate(provider.id)}
                       disabled={saving || !apiKeys[provider.id]}
-                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
+                      className="px-4 py-2 bg-vscode-accent hover:bg-vscode-accentHover disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
                     >
                       <Save className="w-4 h-4" />
                     </button>
@@ -460,26 +460,26 @@ const Profile = () => {
                     )}
                   </div>
 
-                  <p className="text-xs text-[#858585]">
+                  <p className="text-xs text-[#A1A1AA]">
                     {provider.info}
                   </p>
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-              <h4 className="font-medium text-blue-400 mb-2 flex items-center">
+            <div className="mt-6 p-4 bg-vscode-accent/10 border border-vscode-accent/20 rounded-lg">
+              <h4 className="font-medium text-vscode-accent mb-2 flex items-center">
                 <Key className="w-4 h-4 mr-2" />
                 How to Get Free Gemini API Key
               </h4>
-              <ol className="text-sm text-[#cccccc] space-y-1 list-decimal list-inside">
-                <li>Visit <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">aistudio.google.com</a></li>
+              <ol className="text-sm text-[#F4F4F5] space-y-1 list-decimal list-inside">
+                <li>Visit <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-vscode-accent hover:underline">aistudio.google.com</a></li>
                 <li>Sign in with your Google account</li>
                 <li>Click "Get API Key" button</li>
                 <li>Copy your API key (starts with "AIza...")</li>
                 <li>Paste it above and click Save</li>
               </ol>
-              <p className="text-sm text-[#cccccc] mt-3">
+              <p className="text-sm text-[#F4F4F5] mt-3">
                 <strong>Free Tier:</strong> 15 requests/min, 1M tokens/day, No credit card required
               </p>
             </div>
@@ -488,7 +488,7 @@ const Profile = () => {
               <h4 className="font-medium text-green-400 mb-2">
                 Available Gemini Models
               </h4>
-              <ul className="text-sm text-[#cccccc] space-y-1">
+              <ul className="text-sm text-[#F4F4F5] space-y-1">
                 <li>🚀 <strong>Gemini 2.0 Flash</strong> - Ultra-fast responses (Default)</li>
                 <li>🧠 <strong>Gemini 1.5 Pro</strong> - Advanced reasoning, longer context</li>
               </ul>

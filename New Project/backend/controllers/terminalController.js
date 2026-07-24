@@ -295,7 +295,8 @@ export const executeCommand = async (req, res) => {
     console.error('Error executing command:', error);
     
     const io = req.app.get('io');
-    io.to(`project:${projectId}`).emit('terminal:error', {
+    // req.params.projectId, not projectId: the destructured const is scoped to the try block above.
+    io.to(`project:${req.params.projectId}`).emit('terminal:error', {
       terminalId: req.body.terminalId,
       error: error.message,
     });

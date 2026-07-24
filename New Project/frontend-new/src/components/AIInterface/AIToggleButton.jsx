@@ -11,7 +11,7 @@ const AIToggleButton = () => {
       className={`fixed bottom-6 right-6 p-4 rounded-full shadow-2xl transition-all z-40 ${
         isPanelOpen
           ? 'bg-gray-700 hover:bg-gray-600'
-          : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700'
+          : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700'
       }`}
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.9 }}
@@ -27,7 +27,7 @@ const AIToggleButton = () => {
       {/* Pulse animation when closed */}
       {!isPanelOpen && (
         <motion.div
-          className="absolute inset-0 rounded-full bg-blue-500"
+          className="absolute inset-0 rounded-full bg-vscode-accent"
           animate={{
             scale: [1, 1.4, 1],
             opacity: [0.5, 0, 0]

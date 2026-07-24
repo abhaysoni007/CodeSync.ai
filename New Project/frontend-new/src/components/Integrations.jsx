@@ -24,7 +24,7 @@ const Integrations = () => {
       name: 'Gemini',
       company: 'Google',
       icon: <SiGoogle className="text-5xl" />,
-      color: 'from-blue-400 to-indigo-500',
+      color: 'from-emerald-400 to-teal-500',
       description: 'Multimodal AI model',
     },
     {

@@ -14,8 +14,8 @@
 
 /* Theme Styles */
 .file-explorer.dark {
-  background-color: #1e1e1e;
-  color: #cccccc;
+  background-color: #0D0F12;
+  color: #F4F4F5;
 }
 
 .file-explorer.light {
@@ -37,8 +37,8 @@
 }
 
 .file-explorer.dark .file-explorer-header {
-  border-color: #2d2d2d;
-  background-color: #252526;
+  border-color: #15181D;
+  background-color: #15181D;
 }
 
 .file-explorer.light .file-explorer-header {
@@ -107,7 +107,7 @@
 }
 
 .file-explorer.dark .icon-btn:hover {
-  background-color: #2a2d2e;
+  background-color: #20242C;
 }
 
 .file-explorer.light .icon-btn:hover {
@@ -118,7 +118,7 @@
   position: absolute;
   bottom: 0;
   right: 0;
-  background: #007acc;
+  background: #E8A855;
   border-radius: 50%;
   padding: 1px;
 }
@@ -140,7 +140,7 @@
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: #0D0F12;
 }
 
 .file-explorer.light .file-tree::-webkit-scrollbar-track {
@@ -148,21 +148,21 @@
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: #292E38;
   border-radius: 5px;
 }
 
 .file-explorer.light .file-tree::-webkit-scrollbar-thumb {
-  background: #c4c4c4;
+  background: #A1A1AA;
   border-radius: 5px;
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-thumb:hover {
-  background: #4e4e4e;
+  background: #20242C;
 }
 
 .file-explorer.light .file-tree::-webkit-scrollbar-thumb:hover {
-  background: #a6a6a6;
+  background: #A1A1AA;
 }
 
 /* ============================================
@@ -186,7 +186,7 @@
 }
 
 .file-explorer.dark .tree-node-content:hover {
-  background-color: #2a2d2e;
+  background-color: #20242C;
 }
 
 .file-explorer.light .tree-node-content:hover {
@@ -194,19 +194,19 @@
 }
 
 .file-explorer.dark .tree-node-content.selected {
-  background-color: #37373d;
+  background-color: #20242C;
 }
 
 .file-explorer.light .tree-node-content.selected {
-  background-color: #d6d6d6;
+  background-color: #A1A1AA;
 }
 
 .file-explorer.dark .tree-node-content.selected:hover {
-  background-color: #3e3e42;
+  background-color: #20242C;
 }
 
 .file-explorer.light .tree-node-content.selected:hover {
-  background-color: #c8c8c8;
+  background-color: #A1A1AA;
 }
 
 /* Expand/Collapse Icon */
@@ -253,7 +253,7 @@
   flex: 1;
   font-size: 13px;
   padding: 2px 4px;
-  border: 1px solid #007acc;
+  border: 1px solid #E8A855;
   border-radius: 2px;
   outline: none;
   background: transparent;
@@ -262,7 +262,7 @@
 }
 
 .file-explorer.dark .rename-input {
-  background-color: #1e1e1e;
+  background-color: #0D0F12;
 }
 
 .file-explorer.light .rename-input {
@@ -288,13 +288,13 @@
 }
 
 .context-menu.dark {
-  background-color: #2d2d30;
-  border: 1px solid #454545;
+  background-color: #1C2027;
+  border: 1px solid #292E38;
 }
 
 .context-menu.light {
   background-color: #ffffff;
-  border: 1px solid #d4d4d4;
+  border: 1px solid #F4F4F5;
 }
 
 @keyframes contextMenuFadeIn {
@@ -319,7 +319,7 @@
 }
 
 .context-menu.dark .context-menu-item:hover {
-  background-color: #094771;
+  background-color: #3A2A14;
 }
 
 .context-menu.light .context-menu-item:hover {
@@ -327,7 +327,7 @@
 }
 
 .context-menu-item.danger {
-  color: #f48771;
+  color: #F87171;
 }
 
 .context-menu-item.danger:hover {
@@ -346,11 +346,11 @@
 }
 
 .context-menu.dark .context-menu-divider {
-  background-color: #454545;
+  background-color: #292E38;
 }
 
 .context-menu.light .context-menu-divider {
-  background-color: #d4d4d4;
+  background-color: #F4F4F5;
 }
 
 /* ============================================
@@ -385,8 +385,8 @@
 }
 
 .modal-content.dark {
-  background-color: #2d2d30;
-  color: #cccccc;
+  background-color: #1C2027;
+  color: #F4F4F5;
 }
 
 .modal-content.light {
@@ -412,19 +412,19 @@
 }
 
 .modal-content.dark .modal-input {
-  background-color: #1e1e1e;
-  border-color: #3c3c3c;
-  color: #cccccc;
+  background-color: #0D0F12;
+  border-color: #292E38;
+  color: #F4F4F5;
 }
 
 .modal-content.light .modal-input {
   background-color: #ffffff;
-  border-color: #d4d4d4;
+  border-color: #F4F4F5;
   color: #383838;
 }
 
 .modal-input:focus {
-  border-color: #007acc;
+  border-color: #E8A855;
 }
 
 .modal-actions {
@@ -446,16 +446,16 @@
 }
 
 .btn-primary {
-  background-color: #007acc;
+  background-color: #E8A855;
   color: #ffffff;
 }
 
 .btn-primary:hover {
-  background-color: #0098ff;
+  background-color: #F0BE7A;
 }
 
 .btn-primary:active {
-  background-color: #005a9e;
+  background-color: #C98A3E;
 }
 
 .btn-secondary {
@@ -465,15 +465,15 @@
 }
 
 .modal-content.dark .btn-secondary {
-  border-color: #3c3c3c;
+  border-color: #292E38;
 }
 
 .modal-content.light .btn-secondary {
-  border-color: #d4d4d4;
+  border-color: #F4F4F5;
 }
 
 .modal-content.dark .btn-secondary:hover {
-  background-color: #2a2d2e;
+  background-color: #20242C;
 }
 
 .modal-content.light .btn-secondary:hover {
@@ -506,12 +506,12 @@
 }
 
 .file-explorer.dark .spinner {
-  border-color: #3c3c3c;
+  border-color: #292E38;
   border-top-color: transparent;
 }
 
 .file-explorer.light .spinner {
-  border-color: #d4d4d4;
+  border-color: #F4F4F5;
   border-top-color: transparent;
 }
 
@@ -523,7 +523,7 @@
 
 .file-explorer-error button {
   padding: 8px 16px;
-  background-color: #007acc;
+  background-color: #E8A855;
   color: white;
   border: none;
   border-radius: 4px;
@@ -533,7 +533,7 @@
 }
 
 .file-explorer-error button:hover {
-  background-color: #0098ff;
+  background-color: #F0BE7A;
 }
 
 /* ============================================

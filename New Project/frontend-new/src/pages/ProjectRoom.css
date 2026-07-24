@@ -44,7 +44,7 @@
 
 /* Remote Cursor Styles */
 .remote-cursor {
-  border-left: 2px solid var(--cursor-color, #007acc) !important;
+  border-left: 2px solid var(--cursor-color, #E8A855) !important;
   position: relative;
   z-index: 100;
 }
@@ -53,7 +53,7 @@
   position: absolute;
   width: 2px;
   height: 100%;
-  background-color: var(--cursor-color, #007acc);
+  background-color: var(--cursor-color, #E8A855);
   animation: cursor-blink 1s infinite;
 }
 
@@ -63,7 +63,7 @@
 
 .remote-cursor-line-decoration {
   width: 4px !important;
-  background-color: var(--cursor-color, #007acc) !important;
+  background-color: var(--cursor-color, #E8A855) !important;
   margin-left: 3px;
 }
 
@@ -71,7 +71,7 @@
   position: absolute;
   top: -22px;
   left: 0;
-  background-color: var(--cursor-color, #007acc);
+  background-color: var(--cursor-color, #E8A855);
   color: white;
   padding: 2px 6px;
   border-radius: 3px;
@@ -190,7 +190,7 @@
 
 .video-tile {
   position: relative;
-  background-color: #1a1a1a;
+  background-color: #0D0F12;
   border-radius: 8px;
   overflow: hidden;
   aspect-ratio: 16/9;

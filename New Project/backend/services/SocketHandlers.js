@@ -9,7 +9,6 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import setupDeltaSockets from './DeltaEngine/DeltaSocketHandlers.js';
 
 // Debounce helper for activity logging
 const activityDebounce = new Map();
@@ -96,9 +95,6 @@ export const setupYjsHandlers = (io) => {
 
   io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.username} (userId: ${socket.userId}, socketId: ${socket.id})`);
-
-    // Setup Delta Sync handlers
-    setupDeltaSockets(io, socket);
 
     /**
      * Join a room for collaboration
@@ -789,74 +785,12 @@ export const setupYjsHandlers = (io) => {
     });
 
     /**
-     * File created event
+     * File Explorer - File/Folder created.
+     * Relays the change to peers AND logs it to the activity timeline (the timeline logging
+     * used to live on the retired `file-created` handler — it is ported here so the unified
+     * filesystem path keeps feeding the timeline).
      */
-    socket.on('file-created', async ({ projectId, file }) => {
-      const projectRoom = `project:${projectId}`;
-      
-      // Log activity and broadcast in real-time
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: 'file_created',
-        action: `${socket.username} created file ${file.name}`,
-        metadata: {
-          fileName: file.name,
-          fileId: file._id
-        }
-      });
-      
-      socket.to(projectRoom).emit('file-created', file);
-    });
-
-    /**
-     * File deleted event
-     */
-    socket.on('file-deleted', async ({ projectId, fileId, fileName }) => {
-      const projectRoom = `project:${projectId}`;
-      
-      // Log activity and broadcast in real-time
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: 'file_deleted',
-        action: `${socket.username} deleted file ${fileName || 'a file'}`,
-        metadata: {
-          fileName,
-          fileId
-        }
-      });
-      
-      socket.to(projectRoom).emit('file-deleted', fileId);
-    });
-
-    /**
-     * File renamed event
-     */
-    socket.on('file-renamed', async ({ projectId, fileId, oldName, newName }) => {
-      const projectRoom = `project:${projectId}`;
-      
-      // Log activity and broadcast in real-time
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: 'file_renamed',
-        action: `${socket.username} renamed file from ${oldName} to ${newName}`,
-        metadata: {
-          fileName: newName,
-          oldName,
-          newName,
-          fileId
-        }
-      });
-      
-      socket.to(projectRoom).emit('file-renamed', { fileId, newName });
-    });
-
-    /**
-     * File Explorer - File/Folder created
-     */
-    socket.on('filesystem:created', ({ projectId, node, parentPath }) => {
+    socket.on('filesystem:created', async ({ projectId, node, parentPath }) => {
       const projectRoom = `project:${projectId}`;
       socket.to(projectRoom).emit('filesystem:created', {
         node,
@@ -865,12 +799,20 @@ export const setupYjsHandlers = (io) => {
         username: socket.username,
         timestamp: new Date().toISOString()
       });
+
+      await logAndBroadcastActivity(io, {
+        projectId,
+        userId: socket.userId,
+        type: `${node?.type || 'file'}_created`,
+        action: `${socket.username} created ${node?.type || 'file'} ${node?.name}`,
+        metadata: { fileName: node?.name, nodeId: node?.id }
+      });
     });
 
     /**
      * File Explorer - File/Folder renamed
      */
-    socket.on('filesystem:renamed', ({ projectId, path, oldName, newName }) => {
+    socket.on('filesystem:renamed', async ({ projectId, path, oldName, newName }) => {
       const projectRoom = `project:${projectId}`;
       socket.to(projectRoom).emit('filesystem:renamed', {
         path,
@@ -880,12 +822,20 @@ export const setupYjsHandlers = (io) => {
         username: socket.username,
         timestamp: new Date().toISOString()
       });
+
+      await logAndBroadcastActivity(io, {
+        projectId,
+        userId: socket.userId,
+        type: 'file_renamed',
+        action: `${socket.username} renamed ${oldName} to ${newName}`,
+        metadata: { fileName: newName, oldName, newName }
+      });
     });
 
     /**
      * File Explorer - File/Folder deleted
      */
-    socket.on('filesystem:deleted', ({ projectId, path, deletedNode }) => {
+    socket.on('filesystem:deleted', async ({ projectId, path, deletedNode }) => {
       const projectRoom = `project:${projectId}`;
       socket.to(projectRoom).emit('filesystem:deleted', {
         path,
@@ -893,6 +843,14 @@ export const setupYjsHandlers = (io) => {
         userId: socket.userId,
         username: socket.username,
         timestamp: new Date().toISOString()
+      });
+
+      await logAndBroadcastActivity(io, {
+        projectId,
+        userId: socket.userId,
+        type: `${deletedNode?.type || 'file'}_deleted`,
+        action: `${socket.username} deleted ${deletedNode?.type || 'file'} ${deletedNode?.name || 'an item'}`,
+        metadata: { fileName: deletedNode?.name, nodeId: deletedNode?.id }
       });
     });
 

@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import connectDB from './config/database.js';
+import { assertRequiredEnv } from './config/env.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -19,16 +20,17 @@ import callRoutes from './routes/calls.js';
 import aiRoutes from './routes/ai.js';
 import agentRoutes from './routes/agent.js';
 import filesystemRoutes from './routes/filesystem.js';
-import deltaRoutes from './routes/delta.js';
 import terminalRoutes from './routes/terminal.js';
 
-// Import Yjs handlers
+// Import socket handlers
 import setupYjsHandlers from './services/SocketHandlers.js';
-import setupDeltaSockets from './services/DeltaEngine/DeltaSocketHandlers.js';
 import setupTerminalSockets from './services/TerminalSocketHandlers.js';
 
 // Load environment variables
 dotenv.config();
+
+// Fail fast on missing secrets rather than falling back to insecure hardcoded defaults.
+assertRequiredEnv();
 
 // Initialize Express app
 const app = express();
@@ -111,7 +113,6 @@ app.use('/rooms', callRoutes);
 app.use('/ai', aiRoutes);
 app.use('/ai', agentRoutes);
 app.use('/api/filesystem', filesystemRoutes);
-app.use('/delta', deltaRoutes);
 app.use('/api/terminal', terminalRoutes);
 
 // Basic route
