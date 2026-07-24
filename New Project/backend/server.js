@@ -44,11 +44,16 @@ const allowedOrigins = [
   "http://localhost:3000",                       // fallback
 ].filter(Boolean); // removes undefined
 
+// Vercel preview deploys get a unique subdomain per push, e.g.
+// codesyncai-<hash>-abhays-projects-b61eccb0.vercel.app — scoped to this
+// team so we don't open CORS to every *.vercel.app app.
+const vercelPreviewOrigin = /^https:\/\/codesyncai-[a-z0-9]+-abhays-projects-b61eccb0\.vercel\.app$/;
+
 // ✅ Centralized CORS logic
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+    if (allowedOrigins.includes(origin) || vercelPreviewOrigin.test(origin)) {
       return callback(null, true);
     }
     console.warn("❌ Blocked by CORS:", origin);
