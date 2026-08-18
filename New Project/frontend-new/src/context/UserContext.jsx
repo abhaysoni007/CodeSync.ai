@@ -4,6 +4,10 @@ import { api } from '../utils/api';
 
 const UserContext = createContext(null);
 
+// The API returns raw Mongo documents, which carry `_id`. Components read `user.id`. Normalising
+// here (instead of at 20 call sites) keeps "who am I" answerable everywhere.
+const withId = (user) => (user ? { ...user, id: user.id || user._id } : user);
+
 export const useUser = () => {
   const context = useContext(UserContext);
   if (!context) {
@@ -26,11 +30,11 @@ export const UserProvider = ({ children }) => {
       if (storedToken && storedUser) {
         try {
           setToken(storedToken);
-          setUser(JSON.parse(storedUser));
+          setUser(withId(JSON.parse(storedUser)));
           
           // Verify token is still valid
           const response = await api.getProfile();
-          setUser(response.data.user);
+          setUser(withId(response.data.user));
           localStorage.setItem('user', JSON.stringify(response.data.user));
         } catch (error) {
           console.error('Failed to load user:', error);
@@ -49,7 +53,7 @@ export const UserProvider = ({ children }) => {
       const { token: newToken, user: newUser } = response.data;
 
       setToken(newToken);
-      setUser(newUser);
+      setUser(withId(newUser));
       localStorage.setItem('token', newToken);
       localStorage.setItem('user', JSON.stringify(newUser));
 
@@ -69,7 +73,7 @@ export const UserProvider = ({ children }) => {
       const { token: newToken, user: newUser } = response.data;
 
       setToken(newToken);
-      setUser(newUser);
+      setUser(withId(newUser));
       localStorage.setItem('token', newToken);
       localStorage.setItem('user', JSON.stringify(newUser));
 
@@ -93,7 +97,7 @@ export const UserProvider = ({ children }) => {
 
   const updateUser = (updates) => {
     const updatedUser = { ...user, ...updates };
-    setUser(updatedUser);
+    setUser(withId(updatedUser));
     localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 

@@ -1,12 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as fileAPI from '../services/fileAPI';
 import toast from 'react-hot-toast';
 
 /**
- * Custom hook for managing file explorer state and operations
- * @param {string} projectId - The current project ID
- * @param {Object} socket - Socket.io instance for real-time updates
- * @returns {Object} - File explorer state and methods
+ * File explorer state.
+ *
+ * The server reads the project's real directory, so the tree here is a view of disk, not a copy we
+ * have to keep patched. Every mutation - ours, a collaborator's, or one the shell made by running
+ * `npm install` - is answered the same way: refetch. That is why the old per-event patching
+ * (handleCreated/handleRenamed/handleDeleted rewriting nodes in place) is gone: it could only ever
+ * describe changes that came through the UI, and silently drifted from disk for everything else.
+ *
+ * A node's `path` is its real path from the project root, e.g. ['src', 'index.js'], and its `id`
+ * is that path joined - unique, and stable across reloads.
  */
 export const useFileExplorer = (projectId, socket) => {
   const [fileStructure, setFileStructure] = useState(null);
@@ -17,22 +23,14 @@ export const useFileExplorer = (projectId, socket) => {
   const [renamingNode, setRenamingNode] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
 
-  /**
-   * Load file structure from server
-   */
   const loadFileStructure = useCallback(async () => {
     if (!projectId) return;
 
     try {
-      setLoading(true);
       setError(null);
       const response = await fileAPI.getFileStructure(projectId);
-      
-      if (response.success) {
-        setFileStructure(response.data);
-      } else {
-        throw new Error(response.message || 'Failed to load file structure');
-      }
+      if (!response.success) throw new Error(response.message || 'Failed to load file structure');
+      setFileStructure(response.data);
     } catch (err) {
       console.error('Load file structure error:', err);
       setError(err.message);
@@ -42,9 +40,13 @@ export const useFileExplorer = (projectId, socket) => {
     }
   }, [projectId]);
 
-  /**
-   * Create a new file or folder
-   */
+  // Refetching is cheap but a busy install emits a lot of change events; collapse them.
+  const reloadTimer = useRef(null);
+  const scheduleReload = useCallback(() => {
+    clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(loadFileStructure, 250);
+  }, [loadFileStructure]);
+
   const createNode = useCallback(async (name, type, parentPath = []) => {
     if (!projectId || !name) return;
 
@@ -53,27 +55,16 @@ export const useFileExplorer = (projectId, socket) => {
         name,
         type,
         parentPath,
-        content: type === 'file' ? '' : undefined
+        content: type === 'file' ? '' : undefined,
       });
+      if (!response.success) throw new Error(response.message);
 
-      if (response.success) {
-        // Update local structure
-        await loadFileStructure();
-        
-        // Emit socket event for real-time sync
-        if (socket?.connected) {
-          socket.emit('filesystem:created', {
-            projectId,
-            node: response.data,
-            parentPath
-          });
-        }
-
-        toast.success(`${type === 'file' ? 'File' : 'Folder'} created successfully`);
-        return response.data;
-      } else {
-        throw new Error(response.message);
-      }
+      await loadFileStructure();
+      // Peers already refetch from the server's `filesystem:changed`; this emit is what feeds the
+      // activity timeline, which needs to know *who* did it.
+      socket?.emit('filesystem:created', { projectId, node: response.data, parentPath });
+      toast.success(`${type === 'file' ? 'File' : 'Folder'} created`);
+      return response.data;
     } catch (err) {
       console.error('Create node error:', err);
       toast.error(err.response?.data?.message || err.message || 'Failed to create');
@@ -81,38 +72,18 @@ export const useFileExplorer = (projectId, socket) => {
     }
   }, [projectId, socket, loadFileStructure]);
 
-  /**
-   * Rename a file or folder
-   */
   const renameNode = useCallback(async (path, newName) => {
-    if (!projectId || !path || !newName) return;
+    if (!projectId || !path?.length || !newName) return;
 
     try {
-      const response = await fileAPI.renameFileOrFolder(projectId, {
-        path,
-        newName
-      });
+      const response = await fileAPI.renameFileOrFolder(projectId, { path, newName });
+      if (!response.success) throw new Error(response.message);
 
-      if (response.success) {
-        // Update local structure
-        await loadFileStructure();
-        
-        // Emit socket event
-        if (socket?.connected) {
-          socket.emit('filesystem:renamed', {
-            projectId,
-            path,
-            oldName: response.data.oldName,
-            newName
-          });
-        }
-
-        toast.success('Renamed successfully');
-        setRenamingNode(null);
-        return response.data;
-      } else {
-        throw new Error(response.message);
-      }
+      await loadFileStructure();
+      socket?.emit('filesystem:renamed', { projectId, path, oldName: response.data.oldName, newName });
+      toast.success('Renamed');
+      setRenamingNode(null);
+      return response.data;
     } catch (err) {
       console.error('Rename node error:', err);
       toast.error(err.response?.data?.message || err.message || 'Failed to rename');
@@ -120,33 +91,17 @@ export const useFileExplorer = (projectId, socket) => {
     }
   }, [projectId, socket, loadFileStructure]);
 
-  /**
-   * Delete a file or folder
-   */
   const deleteNode = useCallback(async (path) => {
-    if (!projectId || !path) return;
+    if (!projectId || !path?.length) return;
 
     try {
       const response = await fileAPI.deleteFileOrFolder(projectId, { path });
+      if (!response.success) throw new Error(response.message);
 
-      if (response.success) {
-        // Update local structure
-        await loadFileStructure();
-        
-        // Emit socket event
-        if (socket?.connected) {
-          socket.emit('filesystem:deleted', {
-            projectId,
-            path,
-            deletedNode: response.data
-          });
-        }
-
-        toast.success('Deleted successfully');
-        return response.data;
-      } else {
-        throw new Error(response.message);
-      }
+      await loadFileStructure();
+      socket?.emit('filesystem:deleted', { projectId, path, deletedNode: response.data });
+      toast.success('Deleted');
+      return response.data;
     } catch (err) {
       console.error('Delete node error:', err);
       toast.error(err.response?.data?.message || err.message || 'Failed to delete');
@@ -154,189 +109,108 @@ export const useFileExplorer = (projectId, socket) => {
     }
   }, [projectId, socket, loadFileStructure]);
 
-  /**
-   * Toggle folder expansion
-   */
+  const uploadFiles = useCallback(async (files, parentPath = []) => {
+    if (!projectId || !files?.length) return;
+
+    try {
+      const response = await fileAPI.uploadFiles(projectId, files, parentPath);
+      if (!response.success) throw new Error(response.message);
+
+      await loadFileStructure();
+      toast.success(response.message);
+      return response.data;
+    } catch (err) {
+      console.error('Upload error:', err);
+      toast.error(err.response?.data?.message || err.message || 'Upload failed');
+      throw err;
+    }
+  }, [projectId, loadFileStructure]);
+
+  /** Move a node into another folder. `targetPath` [] means the project root. */
+  const moveNode = useCallback(async (path, targetPath) => {
+    if (!projectId || !path?.length) return;
+
+    try {
+      const response = await fileAPI.moveNode(projectId, { path, targetPath });
+      if (!response.success) throw new Error(response.message);
+
+      await loadFileStructure();
+      socket?.emit('filesystem:renamed', {
+        projectId,
+        path,
+        oldName: path[path.length - 1],
+        newName: path[path.length - 1],
+      });
+      toast.success('Moved');
+      return response.data;
+    } catch (err) {
+      console.error('Move error:', err);
+      toast.error(err.response?.data?.message || err.message || 'Move failed');
+      throw err;
+    }
+  }, [projectId, socket, loadFileStructure]);
+
   const toggleFolder = useCallback((nodeId) => {
-    setExpandedFolders(prev => {
+    setExpandedFolders((prev) => {
       const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
       return next;
     });
   }, []);
 
-  /**
-   * Expand folder
-   */
   const expandFolder = useCallback((nodeId) => {
-    setExpandedFolders(prev => new Set([...prev, nodeId]));
+    setExpandedFolders((prev) => new Set([...prev, nodeId]));
   }, []);
 
-  /**
-   * Collapse folder
-   */
   const collapseFolder = useCallback((nodeId) => {
-    setExpandedFolders(prev => {
+    setExpandedFolders((prev) => {
       const next = new Set(prev);
       next.delete(nodeId);
       return next;
     });
   }, []);
 
-  /**
-   * Select a node
-   */
-  const selectNode = useCallback((node, path) => {
-    setSelectedNode({ node, path });
-  }, []);
+  const selectNode = useCallback((node, path) => setSelectedNode({ node, path }), []);
+  const startRenaming = useCallback((node, path) => setRenamingNode({ node, path }), []);
+  const cancelRenaming = useCallback(() => setRenamingNode(null), []);
 
-  /**
-   * Start renaming a node
-   */
-  const startRenaming = useCallback((node, path) => {
-    setRenamingNode({ node, path });
-  }, []);
-
-  /**
-   * Cancel renaming
-   */
-  const cancelRenaming = useCallback(() => {
-    setRenamingNode(null);
-  }, []);
-
-  /**
-   * Show context menu
-   */
   const showContextMenu = useCallback((event, node, path) => {
     event.preventDefault();
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      node,
-      path
-    });
+    setContextMenu({ x: event.clientX, y: event.clientY, node, path });
   }, []);
 
-  /**
-   * Hide context menu
-   */
-  const hideContextMenu = useCallback(() => {
-    setContextMenu(null);
-  }, []);
+  const hideContextMenu = useCallback(() => setContextMenu(null), []);
 
-  /**
-   * Find node by path
-   */
+  /** Walk the tree by real names, e.g. ['src', 'index.js']. */
   const findNodeByPath = useCallback((structure, path) => {
-    if (!structure || !path || path.length === 0) return structure;
-
+    if (!structure || !path?.length) return structure;
     let current = structure;
-    for (let i = 0; i < path.length; i++) {
+    for (const name of path) {
       if (!current.children) return null;
-      current = current.children.find(child => child.id === path[i]);
+      current = current.children.find((child) => child.name === name);
       if (!current) return null;
     }
     return current;
   }, []);
 
-  /**
-   * Update node in structure
-   */
-  const updateNodeInStructure = useCallback((structure, path, updates) => {
-    const node = findNodeByPath(structure, path);
-    if (node) {
-      Object.assign(node, updates);
-    }
-    return { ...structure };
-  }, [findNodeByPath]);
-
-  /**
-   * Real-time socket event handlers
-   */
+  // One signal, one response: something on disk moved, refetch the tree. The server emits this
+  // for its own HTTP mutations and for anything a terminal writes.
   useEffect(() => {
     if (!socket || !projectId) return;
 
-    // File/Folder created
-    const handleCreated = ({ node, parentPath }) => {
-      setFileStructure(prev => {
-        if (!prev) return prev;
-        
-        const parent = parentPath.length === 0 ? prev : findNodeByPath(prev, parentPath);
-        if (parent && parent.type === 'folder') {
-          if (!parent.children) parent.children = [];
-          
-          // Check if already exists
-          const exists = parent.children.some(child => child.id === node.id);
-          if (!exists) {
-            parent.children.push(node);
-          }
-        }
-        
-        return { ...prev };
-      });
-    };
-
-    // File/Folder renamed
-    const handleRenamed = ({ path, newName }) => {
-      setFileStructure(prev => {
-        if (!prev) return prev;
-        return updateNodeInStructure(prev, path, { name: newName });
-      });
-    };
-
-    // File/Folder deleted
-    const handleDeleted = ({ path }) => {
-      setFileStructure(prev => {
-        if (!prev || path.length === 0) return prev;
-        
-        const parentPath = path.slice(0, -1);
-        const nodeId = path[path.length - 1];
-        const parent = parentPath.length === 0 ? prev : findNodeByPath(prev, parentPath);
-        
-        if (parent && parent.children) {
-          parent.children = parent.children.filter(child => child.id !== nodeId);
-        }
-        
-        return { ...prev };
-      });
-    };
-
-    // File content updated
-    const handleFileUpdated = ({ path, content }) => {
-      setFileStructure(prev => {
-        if (!prev) return prev;
-        return updateNodeInStructure(prev, path, { content });
-      });
-    };
-
-    // Listen to events
-    socket.on('filesystem:created', handleCreated);
-    socket.on('filesystem:renamed', handleRenamed);
-    socket.on('filesystem:deleted', handleDeleted);
-    socket.on('filesystem:file-updated', handleFileUpdated);
-
-    // Cleanup
+    socket.on('filesystem:changed', scheduleReload);
     return () => {
-      socket.off('filesystem:created', handleCreated);
-      socket.off('filesystem:renamed', handleRenamed);
-      socket.off('filesystem:deleted', handleDeleted);
-      socket.off('filesystem:file-updated', handleFileUpdated);
+      socket.off('filesystem:changed', scheduleReload);
+      clearTimeout(reloadTimer.current);
     };
-  }, [socket, projectId, findNodeByPath, updateNodeInStructure]);
+  }, [socket, projectId, scheduleReload]);
 
-  /**
-   * Load initial structure on mount
-   */
   useEffect(() => {
     loadFileStructure();
   }, [loadFileStructure]);
 
   return {
-    // State
     fileStructure,
     loading,
     error,
@@ -345,11 +219,12 @@ export const useFileExplorer = (projectId, socket) => {
     renamingNode,
     contextMenu,
 
-    // Methods
     loadFileStructure,
     createNode,
     renameNode,
     deleteNode,
+    moveNode,
+    uploadFiles,
     toggleFolder,
     expandFolder,
     collapseFolder,
@@ -358,7 +233,7 @@ export const useFileExplorer = (projectId, socket) => {
     cancelRenaming,
     showContextMenu,
     hideContextMenu,
-    findNodeByPath
+    findNodeByPath,
   };
 };
 

@@ -1,8 +1,10 @@
-import { Files, Puzzle } from 'lucide-react';
+import { Files, Search, Radio, Puzzle } from 'lucide-react';
 
 // Slim VS Code-style icon rail that switches what's shown in the left sidebar.
 const ITEMS = [
   { id: 'explorer', icon: Files, label: 'Explorer' },
+  { id: 'search', icon: Search, label: 'Search across files' },
+  { id: 'ports', icon: Radio, label: 'Ports' },
   { id: 'extensions', icon: Puzzle, label: 'Extensions' },
 ];
 

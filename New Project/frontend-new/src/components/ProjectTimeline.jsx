@@ -25,10 +25,12 @@ const ActivityIcon = ({ type }) => {
     case 'user_left':
       return <UserMinus className={iconClass} />;
     case 'file_created':
+    case 'folder_created':
       return <FilePlus className={iconClass} />;
     case 'file_edited':
       return <FileEdit className={iconClass} />;
     case 'file_deleted':
+    case 'folder_deleted':
       return <FileX className={iconClass} />;
     case 'file_renamed':
       return <Edit className={iconClass} />;
@@ -50,6 +52,8 @@ const getActivityColor = (type) => {
     'user_joined': 'bg-green-500',
     'user_left': 'bg-vscode-panel0',
     'file_created': 'bg-amber-500',
+    'folder_created': 'bg-amber-400',
+    'folder_deleted': 'bg-red-400',
     'file_edited': 'bg-yellow-500',
     'file_deleted': 'bg-red-500',
     'file_renamed': 'bg-purple-500',

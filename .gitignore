@@ -24,3 +24,7 @@ Thumbs.db
 
 # Misc
 *.zip
+
+# Runtime data: the terminal mirror and the file-tree store are per-install state, not source.
+New Project/backend/projects/
+New Project/backend/uploads/file-structures/

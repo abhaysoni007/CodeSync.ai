@@ -1,629 +1,532 @@
+/**
+ * Project filesystem.
+ *
+ * WHY THIS IS DISK-BACKED: the previous version kept the tree as one JSON blob in
+ * uploads/file-structures/<id>.json and mirrored it *out* to disk so the terminal had something to
+ * run. Nothing ever read back, so everything the shell produced - `npm install`, `mkdir`, build
+ * output, a cloned repo - existed on disk but was invisible in the explorer, and a mirror refresh
+ * could delete it. There is now exactly one source of truth: the real directory. The editor reads
+ * and writes the same bytes the shell sees.
+ */
+
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+/** Where a project's files live. This is also the terminal's cwd. */
+export const projectDiskDir = (projectId) => path.join(process.cwd(), 'projects', projectId);
 
-// Path to store file structure
-const STRUCTURE_FILE = path.join(__dirname, '../uploads/file-structures');
+// Project ids come from the URL. Anything but a Mongo-style id could walk out of projects/.
+const isSafeProjectId = (id) => typeof id === 'string' && /^[a-fA-F0-9]{24}$/.test(id);
 
-/**
- * Ensure directory exists
- */
-const ensureDir = async (dirPath) => {
-  try {
-    await fs.access(dirPath);
-  } catch {
-    await fs.mkdir(dirPath, { recursive: true });
-  }
-};
+// Directories that are real but not worth walking: one npm install is 30k files and would make
+// every tree fetch enormous. They still appear in the tree (that is the whole point of the
+// rewrite), they are just not expanded.
+// ponytail: fixed skip list + entry cap. Swap for lazy per-folder loading if users need to browse
+// inside node_modules.
+const NO_DESCEND = new Set([
+  'node_modules', '.git', '.venv', 'venv', '__pycache__', '.next', '.cache', 'dist', 'build',
+]);
+const MAX_ENTRIES = 5000;
 
 /**
- * Get structure file path for a project
+ * Resolve a client-supplied path (array of names, optionally led by 'root') to an absolute path
+ * that is provably inside the project directory.
  */
-const getStructurePath = (projectId) => {
-  return path.join(STRUCTURE_FILE, `${projectId}.json`);
-};
-
-/**
- * Initialize default structure
- */
-const getDefaultStructure = () => ({
-  id: 'root',
-  name: 'root',
-  type: 'folder',
-  children: [
-    {
-      id: 'src',
-      name: 'src',
-      type: 'folder',
-      children: [
-        {
-          id: 'index.js',
-          name: 'index.js',
-          type: 'file',
-          content: '// Start coding here\nconsole.log("Hello World!");'
-        }
-      ]
-    },
-    {
-      id: 'readme.md',
-      name: 'README.md',
-      type: 'file',
-      content: '# Welcome to your project\n\nStart building something amazing!'
-    }
-  ]
-});
-
-/**
- * Load file structure from disk
- */
-const loadStructure = async (projectId) => {
-  try {
-    await ensureDir(STRUCTURE_FILE);
-    const structurePath = getStructurePath(projectId);
-    
-    try {
-      const data = await fs.readFile(structurePath, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      // If file doesn't exist, create default structure
-      const defaultStructure = getDefaultStructure();
-      await saveStructure(projectId, defaultStructure);
-      return defaultStructure;
-    }
-  } catch (error) {
-    console.error('Error loading structure:', error);
-    return getDefaultStructure();
-  }
-};
-
-/**
- * Save file structure to disk
- */
-const saveStructure = async (projectId, structure) => {
-  try {
-    await ensureDir(STRUCTURE_FILE);
-    const structurePath = getStructurePath(projectId);
-    await fs.writeFile(structurePath, JSON.stringify(structure, null, 2), 'utf-8');
-    // Keep the on-disk copy in step, so the terminal always runs what the editor shows.
-    await mirrorProjectToDisk(projectId, structure);
-    return true;
-  } catch (error) {
-    console.error('Error saving structure:', error);
-    return false;
-  }
-};
-
-/**
- * Where the terminal (and anything else that needs real files) sees this project.
- */
-const projectDiskDir = (projectId) => path.join(process.cwd(), 'projects', projectId);
-
-const mirrorManifestPath = (projectId) => path.join(STRUCTURE_FILE, `${projectId}.mirror.json`);
-
-// Names come from the client, so a name like '../..' must never escape the project directory.
-const isSafeName = (name) =>
-  typeof name === 'string' &&
-  name.length > 0 &&
-  name !== '.' &&
-  name !== '..' &&
-  !name.includes('/') &&
-  !name.includes('\\');
-
-/**
- * Flatten the tree into relative paths. The root node itself contributes no path segment.
- */
-const collectEntries = (node, prefix = [], out = []) => {
-  for (const child of node.children || []) {
-    if (!isSafeName(child.name)) {
-      console.warn('[Mirror] Skipping unsafe name:', child.name);
-      continue;
-    }
-    const rel = [...prefix, child.name];
-    if (child.type === 'folder') {
-      out.push({ rel, isDir: true });
-      collectEntries(child, rel, out);
-    } else {
-      out.push({ rel, isDir: false, content: child.content || '' });
+export const resolveProjectPath = (projectId, segments = []) => {
+  if (!isSafeProjectId(projectId)) throw new Error('Invalid project id');
+  const root = projectDiskDir(projectId);
+  const parts = (Array.isArray(segments) ? segments : [segments])
+    .filter((s) => s !== undefined && s !== null && s !== '')
+    .map(String);
+  if (parts[0] === 'root') parts.shift();
+  for (const part of parts) {
+    if (part === '.' || part === '..' || part.includes('/') || part.includes('\\')) {
+      throw new Error(`Illegal path segment: ${part}`);
     }
   }
-  return out;
+  const target = path.resolve(root, ...parts);
+  const rel = path.relative(root, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Path escapes project');
+  return { root, target, parts };
 };
 
-/**
- * Write the project's file tree out as real files.
- *
- * WHY: the tree is stored as one JSON blob, but a shell can only run files that exist. The
- * terminal's cwd is this directory, so mirroring is what makes `python main.py` work.
- *
- * Pruning uses a manifest of what a previous mirror wrote, so files the user created *in* the
- * terminal (build output, node_modules, a venv) are never deleted - they were never mirrored.
- */
-export const mirrorProjectToDisk = async (projectId, structure) => {
-  const tree = structure || (await loadStructure(projectId));
+const ensureDir = (dir) => fs.mkdir(dir, { recursive: true });
+
+/** A brand-new project should not open on an empty pane. */
+const SEED = {
+  'README.md': '# Welcome to your project\n\nStart building something amazing!\n',
+  'index.html':
+    '<!doctype html>\n<html>\n  <head>\n    <meta charset="utf-8" />\n    <title>My Page</title>\n' +
+    '  </head>\n  <body>\n    <h1>Hello from CodeSync</h1>\n' +
+    '    <script src="src/index.js"></script>\n  </body>\n</html>\n',
+  'src/index.js': '// Start coding here\nconsole.log("Hello World!");\n',
+};
+
+const ensureProjectDir = async (projectId) => {
   const dir = projectDiskDir(projectId);
+  const fresh = !fsSync.existsSync(dir);
   await ensureDir(dir);
-
-  const entries = collectEntries(tree);
-  const written = [];
-
-  for (const entry of entries) {
-    const target = path.join(dir, ...entry.rel);
-    if (entry.isDir) {
-      await ensureDir(target);
-    } else {
+  if (fresh) {
+    for (const [rel, content] of Object.entries(SEED)) {
+      const target = path.join(dir, ...rel.split('/'));
       await ensureDir(path.dirname(target));
-      // Only write on change: rewriting every save would bump mtimes and confuse watchers/make.
-      let existing = null;
-      try {
-        existing = await fs.readFile(target, 'utf-8');
-      } catch {
-        existing = null;
-      }
-      if (existing !== entry.content) {
-        await fs.writeFile(target, entry.content, 'utf-8');
-      }
+      await fs.writeFile(target, content, 'utf-8');
     }
-    written.push(entry.rel.join('/'));
   }
+  return dir;
+};
 
-  let previous = [];
+/**
+ * Read the directory into the tree shape the explorer renders.
+ *
+ * `id` is the path relative to the project root ('src/index.js'), which makes it unique and
+ * stable - the old random `name_timestamp_rand` ids changed on every recreation and could collide
+ * between two folders holding the same name.
+ */
+const readTree = async (absDir, relParts, counter) => {
+  let dirents = [];
   try {
-    previous = JSON.parse(await fs.readFile(mirrorManifestPath(projectId), 'utf-8'));
+    dirents = await fs.readdir(absDir, { withFileTypes: true });
   } catch {
-    previous = [];
+    return [];
   }
 
-  const stillPresent = new Set(written);
-  for (const rel of previous) {
-    if (stillPresent.has(rel)) continue;
-    await fs.rm(path.join(dir, ...rel.split('/')), { recursive: true, force: true });
+  const children = [];
+  for (const entry of dirents) {
+    if (counter.n >= MAX_ENTRIES) break;
+    counter.n += 1;
+    const rel = [...relParts, entry.name];
+    const id = rel.join('/');
+
+    if (entry.isDirectory()) {
+      const skip = NO_DESCEND.has(entry.name);
+      children.push({
+        id,
+        name: entry.name,
+        type: 'folder',
+        path: rel,
+        truncated: skip,
+        children: skip ? [] : await readTree(path.join(absDir, entry.name), rel, counter),
+      });
+    } else if (entry.isFile()) {
+      let size = 0;
+      try {
+        size = (await fs.stat(path.join(absDir, entry.name))).size;
+      } catch {
+        /* raced with a delete; report it as empty rather than failing the whole tree */
+      }
+      children.push({ id, name: entry.name, type: 'file', path: rel, size });
+    }
   }
 
-  await fs.writeFile(mirrorManifestPath(projectId), JSON.stringify(written), 'utf-8');
+  children.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return children;
+};
+
+export const buildTree = async (projectId) => {
+  const dir = await ensureProjectDir(projectId);
+  return {
+    id: 'root',
+    name: 'root',
+    type: 'folder',
+    path: [],
+    children: await readTree(dir, [], { n: 0 }),
+  };
+};
+
+// Anything above this is not editor content; Monaco would choke and the socket payload would be
+// absurd. The client gets a clear reason instead of a truncated file it might save back.
+const MAX_EDITABLE_BYTES = 2 * 1024 * 1024;
+
+const BINARY_EXT = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.pdf', '.zip', '.gz', '.tar',
+  '.exe', '.dll', '.so', '.dylib', '.class', '.jar', '.woff', '.woff2', '.ttf', '.mp4', '.mp3',
+]);
+
+/**
+ * Decode a file the editor is about to show.
+ *
+ * WHY not just utf-8: on Windows a redirect in the shell (`echo hi > notes.txt` in PowerShell)
+ * writes UTF-16LE with a BOM, and a plain utf-8 read renders that as "h\0i\0" mojibake. Since the
+ * terminal and the editor now share one directory, files the shell wrote have to open cleanly.
+ */
+export const decodeText = (buffer) => {
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) return buffer.toString('utf16le', 2);
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) return buffer.swap16().toString('utf16le', 2);
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return buffer.toString('utf-8', 3);
+  }
+  return buffer.toString('utf-8');
+};
+
+const fail = (res, status, message) => res.status(status).json({ success: false, message });
+
+/** Every handler funnels through this so a bad path is a 400, not a 500 stack trace. */
+const withPath = (req, res, segments, run) => {
+  let resolved;
+  try {
+    resolved = resolveProjectPath(req.params.projectId, segments);
+  } catch (error) {
+    fail(res, 400, error.message);
+    return null;
+  }
+  return run(resolved);
 };
 
 /**
- * Find node by path in tree
+ * Tell everyone in the room the tree moved, so open explorers refetch.
+ * The room name must match the one SocketHandlers' `join-project` uses - a bare projectId reaches
+ * nobody.
  */
-const findNodeByPath = (tree, pathArray) => {
-  if (pathArray.length === 0) return tree;
-  
-  // Skip 'root' in path since tree itself is root
-  const actualPath = pathArray[0] === 'root' ? pathArray.slice(1) : pathArray;
-  
-  if (actualPath.length === 0) return tree;
-  
-  let current = tree;
-  for (let i = 0; i < actualPath.length; i++) {
-    if (!current.children) return null;
-    current = current.children.find(child => child.id === actualPath[i]);
-    if (!current) return null;
+const broadcast = (req, event, payload) => {
+  const io = req.app.get('io');
+  if (io) {
+    io.to(`project:${req.params.projectId}`).emit(event, { projectId: req.params.projectId, ...payload });
   }
-  return current;
-};
-
-/**
- * Find parent node
- */
-const findParentNode = (tree, pathArray) => {
-  if (pathArray.length === 0) return null;
-  const parentPath = pathArray.slice(0, -1);
-  return findNodeByPath(tree, parentPath);
-};
-
-/**
- * Generate unique ID
- */
-const generateId = (name, parentPath = []) => {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substr(2, 5);
-  return `${name}_${timestamp}_${random}`;
 };
 
 /**
  * GET /api/filesystem/:projectId
- * Get entire file structure for a project
  */
 export const getFileStructure = async (req, res) => {
   try {
     const { projectId } = req.params;
-    
-    if (!projectId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Project ID is required' 
-      });
-    }
-
-    const structure = await loadStructure(projectId);
-    
-    res.json({
-      success: true,
-      data: structure
-    });
+    if (!isSafeProjectId(projectId)) return fail(res, 400, 'Invalid project id');
+    res.json({ success: true, data: await buildTree(projectId) });
   } catch (error) {
     console.error('Get file structure error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get file structure',
-      error: error.message
-    });
+    fail(res, 500, error.message);
   }
 };
 
 /**
- * POST /api/filesystem/:projectId/create
- * Create a new file or folder
+ * POST /api/filesystem/:projectId/create   { name, type, parentPath, content }
  */
 export const createFileOrFolder = async (req, res) => {
-  try {
-    const { projectId } = req.params;
-    const { name, type, parentPath = [], content = '' } = req.body;
-
-    console.log('📁 Create request:', { projectId, name, type, parentPath, content: content?.substring(0, 50) });
-
-    if (!projectId || !name || !type) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID, name, and type are required'
-      });
-    }
-
-    if (!['file', 'folder'].includes(type)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Type must be "file" or "folder"'
-      });
-    }
-
-    // Load current structure
-    const structure = await loadStructure(projectId);
-    console.log('📂 Loaded structure:', JSON.stringify(structure, null, 2).substring(0, 500));
-
-    // Find parent node
-    const parent = parentPath.length === 0 ? structure : findNodeByPath(structure, parentPath);
-    console.log('👨‍👦 Parent node:', parent ? { id: parent.id, name: parent.name, type: parent.type } : 'NOT FOUND');
-    
-    if (!parent) {
-      return res.status(404).json({
-        success: false,
-        message: 'Parent folder not found',
-        debug: { parentPath, structureKeys: Object.keys(structure) }
-      });
-    }
-
-    if (parent.type !== 'folder') {
-      return res.status(400).json({
-        success: false,
-        message: 'Parent must be a folder'
-      });
-    }
-
-    // Ensure children array exists
-    if (!parent.children) {
-      parent.children = [];
-    }
-
-    // Check if name already exists
-    const exists = parent.children.some(child => child.name === name);
-    if (exists) {
-      return res.status(409).json({
-        success: false,
-        message: `A ${type} with name "${name}" already exists`
-      });
-    }
-
-    // Create new node
-    const newNode = {
-      id: generateId(name, parentPath),
-      name,
-      type,
-      ...(type === 'folder' ? { children: [] } : { content })
-    };
-
-    // Add to parent
-    parent.children.push(newNode);
-
-    // Save structure
-    await saveStructure(projectId, structure);
-
-    // Emit socket event
-    const io = req.app.get('io');
-    if (io) {
-      io.to(projectId).emit('file_created', {
-        projectId,
-        node: newNode,
-        parentPath
-      });
-    }
-
-    res.status(201).json({
-      success: true,
-      message: `${type.charAt(0).toUpperCase() + type.slice(1)} created successfully`,
-      data: newNode
-    });
-  } catch (error) {
-    console.error('Create file/folder error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create file/folder',
-      error: error.message
-    });
+  const { name, type, parentPath = [], content = '' } = req.body;
+  if (!name || !['file', 'folder'].includes(type)) {
+    return fail(res, 400, 'name and type ("file" | "folder") are required');
   }
+
+  return withPath(req, res, [...parentPath, name], async ({ target, parts }) => {
+    try {
+      await ensureProjectDir(req.params.projectId);
+      if (fsSync.existsSync(target)) {
+        return fail(res, 409, `A file or folder named "${name}" already exists`);
+      }
+      await ensureDir(path.dirname(target));
+      if (type === 'folder') await ensureDir(target);
+      else await fs.writeFile(target, content, 'utf-8');
+
+      const node = { id: parts.join('/'), name, type, path: parts, ...(type === 'folder' ? { children: [] } : { content }) };
+      broadcast(req, 'filesystem:changed', { reason: 'create', path: parts });
+      res.status(201).json({ success: true, message: `${type} created`, data: node });
+    } catch (error) {
+      console.error('Create error:', error);
+      fail(res, 500, error.message);
+    }
+  });
 };
 
 /**
- * PUT /api/filesystem/:projectId/rename
- * Rename a file or folder
+ * PUT /api/filesystem/:projectId/rename   { path, newName }
  */
 export const renameFileOrFolder = async (req, res) => {
-  try {
-    const { projectId } = req.params;
-    const { path: nodePath, newName } = req.body;
+  const { path: nodePath, newName } = req.body;
+  if (!nodePath?.length || !newName) return fail(res, 400, 'path and newName are required');
 
-    if (!projectId || !nodePath || !newName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID, path, and new name are required'
-      });
-    }
-
-    // Load current structure
-    const structure = await loadStructure(projectId);
-
-    // Find the node
-    const node = findNodeByPath(structure, nodePath);
-    if (!node) {
-      return res.status(404).json({
-        success: false,
-        message: 'File or folder not found'
-      });
-    }
-
-    // Find parent to check for duplicates
-    const parent = nodePath.length === 1 ? structure : findParentNode(structure, nodePath);
-    if (parent && parent.children) {
-      const exists = parent.children.some(
-        child => child.name === newName && child.id !== node.id
-      );
-      if (exists) {
-        return res.status(409).json({
-          success: false,
-          message: `A ${node.type} with name "${newName}" already exists`
-        });
+  return withPath(req, res, nodePath, async ({ target, parts }) => {
+    const destParts = [...parts.slice(0, -1), newName];
+    return withPath(req, res, destParts, async ({ target: dest }) => {
+      try {
+        if (!fsSync.existsSync(target)) return fail(res, 404, 'File or folder not found');
+        if (fsSync.existsSync(dest)) return fail(res, 409, `"${newName}" already exists`);
+        await fs.rename(target, dest);
+        broadcast(req, 'filesystem:changed', { reason: 'rename', path: parts, newPath: destParts });
+        res.json({ success: true, message: 'Renamed', data: { oldName: parts.at(-1), newName, path: destParts } });
+      } catch (error) {
+        console.error('Rename error:', error);
+        fail(res, 500, error.message);
       }
-    }
-
-    // Store old name for response
-    const oldName = node.name;
-
-    // Rename the node
-    node.name = newName;
-
-    // Save structure
-    await saveStructure(projectId, structure);
-
-    // Emit socket event
-    const io = req.app.get('io');
-    if (io) {
-      io.to(projectId).emit('file_renamed', {
-        projectId,
-        path: nodePath,
-        oldName,
-        newName
-      });
-    }
-
-    res.json({
-      success: true,
-      message: `${node.type.charAt(0).toUpperCase() + node.type.slice(1)} renamed successfully`,
-      data: { oldName, newName, node }
     });
-  } catch (error) {
-    console.error('Rename file/folder error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to rename file/folder',
-      error: error.message
-    });
-  }
+  });
 };
 
 /**
- * DELETE /api/filesystem/:projectId/delete
- * Delete a file or folder
+ * DELETE /api/filesystem/:projectId/delete   { path }
  */
 export const deleteFileOrFolder = async (req, res) => {
-  try {
-    const { projectId } = req.params;
-    const { path: nodePath } = req.body;
+  const { path: nodePath } = req.body;
+  if (!nodePath?.length) return fail(res, 400, 'path is required');
 
-    if (!projectId || !nodePath || nodePath.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID and path are required'
-      });
+  return withPath(req, res, nodePath, async ({ target, parts, root }) => {
+    try {
+      if (path.resolve(target) === path.resolve(root)) return fail(res, 400, 'Cannot delete the project root');
+      if (!fsSync.existsSync(target)) return fail(res, 404, 'File or folder not found');
+      const isDir = (await fs.stat(target)).isDirectory();
+      await fs.rm(target, { recursive: true, force: true });
+      broadcast(req, 'filesystem:changed', { reason: 'delete', path: parts });
+      res.json({ success: true, message: 'Deleted', data: { path: parts, type: isDir ? 'folder' : 'file' } });
+    } catch (error) {
+      console.error('Delete error:', error);
+      fail(res, 500, error.message);
     }
-
-    // Load current structure
-    const structure = await loadStructure(projectId);
-
-    // Find parent node
-    const parent = nodePath.length === 1 ? structure : findParentNode(structure, nodePath);
-    
-    if (!parent || !parent.children) {
-      return res.status(404).json({
-        success: false,
-        message: 'Parent folder not found'
-      });
-    }
-
-    // Find and remove the node
-    const nodeId = nodePath[nodePath.length - 1];
-    const nodeIndex = parent.children.findIndex(child => child.id === nodeId);
-    
-    if (nodeIndex === -1) {
-      return res.status(404).json({
-        success: false,
-        message: 'File or folder not found'
-      });
-    }
-
-    const deletedNode = parent.children[nodeIndex];
-    parent.children.splice(nodeIndex, 1);
-
-    // Save structure
-    await saveStructure(projectId, structure);
-
-    // Emit socket event
-    const io = req.app.get('io');
-    if (io) {
-      io.to(projectId).emit('file_deleted', {
-        projectId,
-        path: nodePath,
-        deletedNode
-      });
-    }
-
-    res.json({
-      success: true,
-      message: `${deletedNode.type.charAt(0).toUpperCase() + deletedNode.type.slice(1)} deleted successfully`,
-      data: deletedNode
-    });
-  } catch (error) {
-    console.error('Delete file/folder error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete file/folder',
-      error: error.message
-    });
-  }
+  });
 };
 
 /**
- * GET /api/filesystem/:projectId/file
- * Get file content
+ * GET /api/filesystem/:projectId/file?path=["src","index.js"]
  */
 export const getFileContent = async (req, res) => {
+  let nodePath = req.query.path;
   try {
-    const { projectId } = req.params;
-    const { path: nodePath } = req.query;
+    if (typeof nodePath === 'string') nodePath = JSON.parse(nodePath);
+  } catch {
+    return fail(res, 400, 'path must be a JSON array');
+  }
+  if (!nodePath?.length) return fail(res, 400, 'path is required');
 
-    if (!projectId || !nodePath) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID and path are required'
+  return withPath(req, res, nodePath, async ({ target, parts }) => {
+    try {
+      const stat = await fs.stat(target).catch(() => null);
+      if (!stat) return fail(res, 404, 'File not found');
+      if (stat.isDirectory()) return fail(res, 400, 'Path is a folder');
+      if (stat.size > MAX_EDITABLE_BYTES) {
+        return fail(res, 413, `File is ${(stat.size / 1048576).toFixed(1)} MB - too large to open in the editor`);
+      }
+      if (BINARY_EXT.has(path.extname(target).toLowerCase())) {
+        return fail(res, 415, 'Binary file - open it with Download instead');
+      }
+      res.json({
+        success: true,
+        data: {
+          name: parts.at(-1),
+          path: parts,
+          id: parts.join('/'),
+          content: decodeText(await fs.readFile(target)),
+        },
       });
+    } catch (error) {
+      console.error('Read error:', error);
+      fail(res, 500, error.message);
     }
+  });
+};
 
-    // Parse path if it's a string
-    const pathArray = typeof nodePath === 'string' ? JSON.parse(nodePath) : nodePath;
+/**
+ * PUT /api/filesystem/:projectId/file   { path, content }
+ */
+export const updateFileContent = async (req, res) => {
+  const { path: nodePath, content } = req.body;
+  if (!nodePath?.length) return fail(res, 400, 'path is required');
 
-    // Load structure
-    const structure = await loadStructure(projectId);
-
-    // Find the file
-    const file = findNodeByPath(structure, pathArray);
-    
-    if (!file) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found'
-      });
+  return withPath(req, res, nodePath, async ({ target, parts }) => {
+    try {
+      await ensureDir(path.dirname(target));
+      await fs.writeFile(target, content ?? '', 'utf-8');
+      broadcast(req, 'file_updated', { path: parts, content: content ?? '' });
+      res.json({ success: true, message: 'Saved', data: { path: parts, id: parts.join('/') } });
+    } catch (error) {
+      console.error('Write error:', error);
+      fail(res, 500, error.message);
     }
+  });
+};
 
-    if (file.type !== 'file') {
-      return res.status(400).json({
-        success: false,
-        message: 'Path does not point to a file'
-      });
-    }
+/**
+ * POST /api/filesystem/:projectId/move   { path, targetPath }
+ *
+ * Drag-and-drop in the explorer. `targetPath` is the destination FOLDER; the entry keeps its name.
+ */
+export const moveFileOrFolder = async (req, res) => {
+  const { path: nodePath, targetPath = [] } = req.body;
+  if (!nodePath?.length) return fail(res, 400, 'path is required');
 
-    res.json({
-      success: true,
-      data: {
-        name: file.name,
-        content: file.content || '',
-        id: file.id
+  return withPath(req, res, nodePath, async ({ target: source, parts }) => {
+    const name = parts.at(-1);
+    const destParts = [...targetPath.filter((p) => p !== 'root'), name];
+
+    return withPath(req, res, destParts, async ({ target: dest }) => {
+      try {
+        if (!fsSync.existsSync(source)) return fail(res, 404, 'File or folder not found');
+        if (path.resolve(source) === path.resolve(dest)) {
+          return res.json({ success: true, message: 'Already there', data: { path: destParts } });
+        }
+        // Dropping a folder inside itself would delete the tree it is being moved into.
+        const rel = path.relative(source, dest);
+        if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+          return fail(res, 400, 'Cannot move a folder into itself');
+        }
+        if (fsSync.existsSync(dest)) return fail(res, 409, `"${name}" already exists there`);
+
+        await ensureDir(path.dirname(dest));
+        await fs.rename(source, dest);
+        broadcast(req, 'filesystem:changed', { reason: 'move', path: parts, newPath: destParts });
+        res.json({ success: true, message: 'Moved', data: { path: destParts, oldPath: parts } });
+      } catch (error) {
+        console.error('Move error:', error);
+        fail(res, 500, error.message);
       }
     });
+  });
+};
+
+/**
+ * GET /api/filesystem/:projectId/search?q=needle&caseSensitive=&regex=
+ *
+ * Plain text search across the workspace, with line numbers so a hit can be clicked open.
+ * ponytail: a straight recursive scan with caps. If projects ever get large enough for this to
+ * feel slow, shell out to ripgrep instead of building an index.
+ */
+const SEARCH_MAX_FILES = 2000;
+const SEARCH_MAX_HITS = 300;
+const SEARCH_MAX_FILE_BYTES = 512 * 1024;
+
+export const searchProject = async (req, res) => {
+  const { projectId } = req.params;
+  const query = (req.query.q || '').toString();
+  if (!isSafeProjectId(projectId)) return fail(res, 400, 'Invalid project id');
+  if (query.length < 2) return fail(res, 400, 'Search needs at least 2 characters');
+
+  let matcher;
+  try {
+    matcher = req.query.regex === 'true'
+      ? new RegExp(query, req.query.caseSensitive === 'true' ? '' : 'i')
+      : null;
   } catch (error) {
-    console.error('Get file content error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get file content',
-      error: error.message
-    });
+    return fail(res, 400, `Invalid regular expression: ${error.message}`);
+  }
+  const needle = req.query.caseSensitive === 'true' ? query : query.toLowerCase();
+
+  const root = await ensureProjectDir(projectId);
+  const results = [];
+  let filesScanned = 0;
+  let truncated = false;
+
+  const walk = async (dir, relParts) => {
+    if (truncated) return;
+    let entries = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (truncated) return;
+      const rel = [...relParts, entry.name];
+      if (entry.isDirectory()) {
+        if (NO_DESCEND.has(entry.name)) continue;
+        await walk(path.join(dir, entry.name), rel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (BINARY_EXT.has(path.extname(entry.name).toLowerCase())) continue;
+      if (++filesScanned > SEARCH_MAX_FILES) {
+        truncated = true;
+        return;
+      }
+
+      const abs = path.join(dir, entry.name);
+      let stat;
+      try {
+        stat = await fs.stat(abs);
+      } catch {
+        continue;
+      }
+      if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
+
+      let text;
+      try {
+        text = decodeText(await fs.readFile(abs));
+      } catch {
+        continue;
+      }
+      // A file full of NULs is binary whatever its extension says.
+      if (text.includes('\u0000')) continue;
+
+      const lines = text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const hit = matcher
+          ? matcher.test(line)
+          : (req.query.caseSensitive === 'true' ? line : line.toLowerCase()).includes(needle);
+        if (!hit) continue;
+
+        results.push({
+          path: rel,
+          id: rel.join('/'),
+          name: entry.name,
+          line: i + 1,
+          preview: line.length > 200 ? `${line.slice(0, 200)}…` : line,
+        });
+        if (results.length >= SEARCH_MAX_HITS) {
+          truncated = true;
+          return;
+        }
+      }
+    }
+  };
+
+  try {
+    await walk(root, []);
+    res.json({ success: true, data: { results, truncated, filesScanned } });
+  } catch (error) {
+    console.error('Search error:', error);
+    fail(res, 500, error.message);
   }
 };
 
 /**
- * PUT /api/filesystem/:projectId/file
- * Update file content
+ * GET /api/filesystem/:projectId/download?path=[...]  - raw bytes, for binaries and backups.
  */
-export const updateFileContent = async (req, res) => {
+export const downloadFile = async (req, res) => {
+  let nodePath = req.query.path;
   try {
-    const { projectId } = req.params;
-    const { path: nodePath, content } = req.body;
+    if (typeof nodePath === 'string') nodePath = JSON.parse(nodePath);
+  } catch {
+    return fail(res, 400, 'path must be a JSON array');
+  }
+  if (!nodePath?.length) return fail(res, 400, 'path is required');
 
-    if (!projectId || !nodePath) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID and path are required'
-      });
+  return withPath(req, res, nodePath, async ({ target, parts }) => {
+    const stat = await fs.stat(target).catch(() => null);
+    if (!stat || stat.isDirectory()) return fail(res, 404, 'File not found');
+    res.download(target, parts.at(-1));
+  });
+};
+
+/**
+ * POST /api/filesystem/:projectId/upload   multipart: files[] + parentPath
+ */
+export const uploadFiles = async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return fail(res, 400, 'No files uploaded');
+
+  let parentPath = req.body.parentPath || [];
+  try {
+    if (typeof parentPath === 'string') parentPath = JSON.parse(parentPath);
+  } catch {
+    parentPath = [];
+  }
+
+  try {
+    await ensureProjectDir(req.params.projectId);
+    const written = [];
+    for (const file of files) {
+      const { target, parts } = resolveProjectPath(req.params.projectId, [...parentPath, file.originalname]);
+      await ensureDir(path.dirname(target));
+      await fs.writeFile(target, file.buffer);
+      written.push(parts.join('/'));
     }
-
-    // Load structure
-    const structure = await loadStructure(projectId);
-
-    // Find the file
-    const file = findNodeByPath(structure, nodePath);
-    
-    if (!file) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found'
-      });
-    }
-
-    if (file.type !== 'file') {
-      return res.status(400).json({
-        success: false,
-        message: 'Path does not point to a file'
-      });
-    }
-
-    // Update content
-    file.content = content || '';
-
-    // Save structure
-    await saveStructure(projectId, structure);
-
-    // Emit socket event
-    const io = req.app.get('io');
-    if (io) {
-      io.to(projectId).emit('file_updated', {
-        projectId,
-        path: nodePath,
-        content: file.content
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'File updated successfully',
-      data: file
-    });
+    broadcast(req, 'filesystem:changed', { reason: 'upload' });
+    res.status(201).json({ success: true, message: `Uploaded ${written.length} file(s)`, data: written });
   } catch (error) {
-    console.error('Update file content error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update file content',
-      error: error.message
-    });
+    console.error('Upload error:', error);
+    fail(res, 400, error.message);
   }
 };
 
@@ -633,5 +536,9 @@ export default {
   renameFileOrFolder,
   deleteFileOrFolder,
   getFileContent,
-  updateFileContent
+  updateFileContent,
+  moveFileOrFolder,
+  searchProject,
+  downloadFile,
+  uploadFiles,
 };
