@@ -22,6 +22,10 @@ import { useTerminalStore } from '../stores/terminalStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 
+// Which shell the server will start for this client's platform.
+const defaultShell = () =>
+  typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? 'powershell' : 'bash';
+
 const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
   const {
     terminals,
@@ -32,7 +36,6 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     updateTerminalOutput,
     clearTerminalOutput,
     setTerminalStatus,
-    addToHistory,
   } = useTerminalStore();
 
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -45,11 +48,15 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
   const containerRef = useRef(null);
   const resizeStartRef = useRef(null);
 
-  // Initialize default terminal on mount
+  // Initialize default terminal on mount. The ref guard matters because StrictMode runs this
+  // effect twice in dev and both runs would otherwise see an empty list and add a tab.
+  const defaultTerminalCreated = useRef(false);
+
   useEffect(() => {
+    if (defaultTerminalCreated.current) return;
+    defaultTerminalCreated.current = true;
     if (terminals.length === 0) {
-      const terminalId = `terminal-${Date.now()}`;
-      addTerminal(terminalId, 'bash');
+      addTerminal(`terminal-${Date.now()}`, defaultShell());
     }
   }, []);
 
@@ -103,8 +110,11 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     };
   }, [socket]);
 
-  // Initialize xterm instances for each terminal
+  // Initialize xterm instances for each terminal.
+  // isVisible matters: the container divs only exist while the panel is shown, so an instance
+  // cannot attach before then. Without this dep, opening the panel left a blank box.
   useEffect(() => {
+    if (!isVisible) return;
     terminals.forEach((terminal) => {
       if (!terminalRefs.current[terminal.id]) {
         initializeTerminal(terminal.id);
@@ -121,7 +131,7 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
         }
       }
     });
-  }, [terminals]);
+  }, [terminals, isVisible]);
 
   // Fit terminal on resize
   useEffect(() => {
@@ -172,7 +182,7 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
         brightWhite: '#e5e5e5'
       },
       scrollback: 1000,
-      convertEol: true,
+      convertEol: false,
       disableStdin: false,
       rows: 20,
       cols: 80,
@@ -198,52 +208,17 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       }
     }, 100);
 
-    // Handle user input
-    let currentLine = '';
-    
+    // Send every keystroke straight to the PTY. WHY: the shell (not this component) owns line
+    // editing, history, tab completion and Ctrl+C - that is what makes it behave like VS Code.
     term.onData((data) => {
-      const code = data.charCodeAt(0);
+      if (!socket) return;
+      socket.emit('terminal:input', { terminalId, projectId, data });
+    });
 
-      // Handle Enter key
-      if (code === 13) {
-        term.write('\r\n');
-        if (currentLine.trim()) {
-          executeCommand(terminalId, currentLine.trim());
-          addToHistory(terminalId, currentLine.trim());
-        }
-        currentLine = '';
-        return;
-      }
-
-      // Handle Backspace
-      if (code === 127) {
-        if (currentLine.length > 0) {
-          currentLine = currentLine.slice(0, -1);
-          term.write('\b \b');
-        }
-        return;
-      }
-
-      // Handle Ctrl+C
-      if (code === 3) {
-        term.write('^C\r\n');
-        killProcess(terminalId);
-        currentLine = '';
-        return;
-      }
-
-      // Handle Ctrl+L (clear)
-      if (code === 12) {
-        term.clear();
-        currentLine = '';
-        return;
-      }
-
-      // Regular character input
-      if (code >= 32 && code <= 126) {
-        currentLine += data;
-        term.write(data);
-      }
+    // Tell the PTY its window size, or the shell wraps at the wrong column.
+    term.onResize(({ cols, rows }) => {
+      if (!socket) return;
+      socket.emit('terminal:resize', { terminalId, cols, rows });
     });
 
     // Request terminal creation on backend
@@ -251,21 +226,11 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       socket.emit('terminal:create', {
         terminalId,
         projectId,
-        shell: 'powershell', // Windows default
+        shell: terminals.find((t) => t.id === terminalId)?.shell || defaultShell(),
+        cols: term.cols,
+        rows: term.rows,
       });
     }
-  };
-
-  const executeCommand = (terminalId, command) => {
-    if (!socket || !command.trim()) return;
-
-    setTerminalStatus(terminalId, 'running');
-
-    socket.emit('terminal:execute', {
-      terminalId,
-      projectId,
-      command: command.trim(),
-    });
   };
 
   const killProcess = (terminalId) => {
@@ -277,16 +242,11 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     });
 
     setTerminalStatus(terminalId, 'idle');
-    
-    const term = terminalRefs.current[terminalId];
-    if (term) {
-      term.write('\r\n\x1b[33m[Process killed]\x1b[0m\r\n');
-    }
   };
 
   const handleCreateTerminal = () => {
     const terminalId = `terminal-${Date.now()}`;
-    addTerminal(terminalId, 'powershell');
+    addTerminal(terminalId, defaultShell());
     setActiveTerminal(terminalId);
     toast.success('New terminal created');
   };
@@ -379,8 +339,6 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     }
   }, [isDragging]);
 
-  if (!isVisible) return null;
-
   const activeTerminal = terminals.find(t => t.id === activeTerminalId);
 
   return (
@@ -392,6 +350,7 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
         transition={{ duration: 0.2 }}
         className="terminal-panel fixed bottom-0 left-0 right-0 bg-vscode-panel border-t border-vscode-border z-40"
         style={{ 
+          display: isVisible ? 'block' : 'none',
           height: isCollapsed ? '40px' : isMaximized ? 'calc(100vh - 48px)' : `${panelHeight}px`,
           transition: isCollapsed || isMaximized ? 'height 0.2s ease' : 'none'
         }}

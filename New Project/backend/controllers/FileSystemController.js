@@ -87,11 +87,102 @@ const saveStructure = async (projectId, structure) => {
     await ensureDir(STRUCTURE_FILE);
     const structurePath = getStructurePath(projectId);
     await fs.writeFile(structurePath, JSON.stringify(structure, null, 2), 'utf-8');
+    // Keep the on-disk copy in step, so the terminal always runs what the editor shows.
+    await mirrorProjectToDisk(projectId, structure);
     return true;
   } catch (error) {
     console.error('Error saving structure:', error);
     return false;
   }
+};
+
+/**
+ * Where the terminal (and anything else that needs real files) sees this project.
+ */
+const projectDiskDir = (projectId) => path.join(process.cwd(), 'projects', projectId);
+
+const mirrorManifestPath = (projectId) => path.join(STRUCTURE_FILE, `${projectId}.mirror.json`);
+
+// Names come from the client, so a name like '../..' must never escape the project directory.
+const isSafeName = (name) =>
+  typeof name === 'string' &&
+  name.length > 0 &&
+  name !== '.' &&
+  name !== '..' &&
+  !name.includes('/') &&
+  !name.includes('\\');
+
+/**
+ * Flatten the tree into relative paths. The root node itself contributes no path segment.
+ */
+const collectEntries = (node, prefix = [], out = []) => {
+  for (const child of node.children || []) {
+    if (!isSafeName(child.name)) {
+      console.warn('[Mirror] Skipping unsafe name:', child.name);
+      continue;
+    }
+    const rel = [...prefix, child.name];
+    if (child.type === 'folder') {
+      out.push({ rel, isDir: true });
+      collectEntries(child, rel, out);
+    } else {
+      out.push({ rel, isDir: false, content: child.content || '' });
+    }
+  }
+  return out;
+};
+
+/**
+ * Write the project's file tree out as real files.
+ *
+ * WHY: the tree is stored as one JSON blob, but a shell can only run files that exist. The
+ * terminal's cwd is this directory, so mirroring is what makes `python main.py` work.
+ *
+ * Pruning uses a manifest of what a previous mirror wrote, so files the user created *in* the
+ * terminal (build output, node_modules, a venv) are never deleted - they were never mirrored.
+ */
+export const mirrorProjectToDisk = async (projectId, structure) => {
+  const tree = structure || (await loadStructure(projectId));
+  const dir = projectDiskDir(projectId);
+  await ensureDir(dir);
+
+  const entries = collectEntries(tree);
+  const written = [];
+
+  for (const entry of entries) {
+    const target = path.join(dir, ...entry.rel);
+    if (entry.isDir) {
+      await ensureDir(target);
+    } else {
+      await ensureDir(path.dirname(target));
+      // Only write on change: rewriting every save would bump mtimes and confuse watchers/make.
+      let existing = null;
+      try {
+        existing = await fs.readFile(target, 'utf-8');
+      } catch {
+        existing = null;
+      }
+      if (existing !== entry.content) {
+        await fs.writeFile(target, entry.content, 'utf-8');
+      }
+    }
+    written.push(entry.rel.join('/'));
+  }
+
+  let previous = [];
+  try {
+    previous = JSON.parse(await fs.readFile(mirrorManifestPath(projectId), 'utf-8'));
+  } catch {
+    previous = [];
+  }
+
+  const stillPresent = new Set(written);
+  for (const rel of previous) {
+    if (stillPresent.has(rel)) continue;
+    await fs.rm(path.join(dir, ...rel.split('/')), { recursive: true, force: true });
+  }
+
+  await fs.writeFile(mirrorManifestPath(projectId), JSON.stringify(written), 'utf-8');
 };
 
 /**

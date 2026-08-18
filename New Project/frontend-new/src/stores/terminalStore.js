@@ -1,13 +1,10 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 /**
  * Terminal Store
  * Manages terminal sessions, history, and state
  */
-export const useTerminalStore = create(
-  persist(
-    (set, get) => ({
+export const useTerminalStore = create((set, get) => ({
       // State
       terminals: [],
       activeTerminalId: null,
@@ -147,17 +144,4 @@ export const useTerminalStore = create(
         const { terminals, activeTerminalId } = get();
         return terminals.find((t) => t.id === activeTerminalId);
       },
-    }),
-    {
-      name: 'terminal-storage',
-      partialize: (state) => ({
-        // Only persist terminal history, not full state
-        terminals: state.terminals.map((t) => ({
-          id: t.id,
-          shell: t.shell,
-          history: t.history.slice(-50), // Keep last 50 commands
-        })),
-      }),
-    }
-  )
-);
+}));
