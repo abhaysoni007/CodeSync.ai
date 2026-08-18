@@ -13,7 +13,7 @@ import fs from 'fs';
 import os from 'os';
 import pty from 'node-pty';
 import { executionBlockedNotice } from '../config/execution.js';
-import { mirrorProjectToDisk } from '../controllers/FileSystemController.js';
+import { buildTree } from '../controllers/FileSystemController.js';
 import Project from '../models/Project.js';
 
 // terminalId -> { socketId, projectId, proc, cwd }
@@ -117,11 +117,11 @@ export const setupTerminalSockets = (io) => {
           return;
         }
 
+        // buildTree seeds the directory on first use; the shell and the explorer read the same
+        // bytes, so there is nothing to mirror.
+        await buildTree(projectId);
         const cwd = projectDir(projectId);
         fs.mkdirSync(cwd, { recursive: true });
-
-        // The editor keeps files in a JSON tree; put them on disk so the shell can run them.
-        await mirrorProjectToDisk(projectId);
 
         const { file, args } = shellFor(shell);
         const proc = pty.spawn(file, args, {
@@ -142,7 +142,8 @@ export const setupTerminalSockets = (io) => {
         sessions.set(terminalId, { socketId: socket.id, projectId, proc, cwd });
 
         // Output goes to the creating socket only: a shell on the host is not something to
-        // broadcast to every collaborator in the room.
+        // broadcast to every collaborator in the room. Files the shell writes are picked up by
+        // ProjectWatcher, which watches the directory itself.
         proc.onData((data) => socket.emit('terminal:output', { terminalId, output: data }));
 
         proc.onExit(({ exitCode }) => {
@@ -215,9 +216,6 @@ export const setupTerminalSockets = (io) => {
           });
           return;
         }
-
-        // Refresh the mirror: the file may have been saved a moment ago.
-        await mirrorProjectToDisk(projectId);
 
         const [terminalId, session] = entry;
         socket.emit('terminal:output', {

@@ -584,3 +584,24 @@
   overflow: hidden;
   transition: height 0.2s ease;
 }
+
+/* Refresh spinner, drop highlight and the "not expanded" badge on skipped folders. */
+@keyframes fe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.file-explorer .spinning {
+  animation: fe-spin 0.7s linear infinite;
+}
+
+.file-explorer .tree-node-content.drop-target {
+  outline: 1px dashed var(--vscode-accent, #e8a855);
+  outline-offset: -1px;
+  background: rgba(232, 168, 85, 0.08);
+}
+
+.file-explorer .node-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.5;
+}

@@ -90,20 +90,30 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       }
     });
 
-    socket.on('terminal:created', (data) => {
-      const { terminalId, cwd } = data;
+    // The PTY prints its own prompt; a second, fake one just left two prompts on screen. All we
+    // do on creation is make the shell agree with the window we are showing, and mark the tab
+    // ready so anything queued (the explorer's Run button) can fire.
+    socket.on('terminal:created', ({ terminalId }) => {
       const term = terminalRefs.current[terminalId];
-      if (term) {
-        term.write(`\x1b[32m[Terminal ready]\x1b[0m\r\n`);
-        term.write(`\x1b[36m${cwd}>\x1b[0m `);
-      }
+      if (term) socket.emit('terminal:resize', { terminalId, cols: term.cols, rows: term.rows });
+      setTerminalStatus(terminalId, 'ready');
     });
+
+    // A reconnect gives us a new socket id, and the server ties every PTY to the socket that
+    // created it - the old shells are gone. Re-create one per open tab instead of leaving dead
+    // panes behind.
+    const handleReconnect = () => {
+      createdSessions.current.clear();
+      Object.keys(terminalRefs.current).forEach((terminalId) => requestSession(terminalId));
+    };
+    socket.on('connect', handleReconnect);
 
     return () => {
       socket.off('terminal:output');
       socket.off('terminal:error');
       socket.off('terminal:exit');
       socket.off('terminal:created');
+      socket.off('connect', handleReconnect);
     };
   }, [socket]);
 

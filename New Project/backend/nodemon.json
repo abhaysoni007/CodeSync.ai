@@ -1,0 +1,13 @@
+{
+  "//": "The server writes runtime data underneath itself: `projects/` is the on-disk mirror the terminal runs from, and `uploads/` holds the saved file trees and avatars. Watching those means every file save, every terminal:create and every mirror refresh restarts the server - which drops every socket and kills every open terminal, in a loop.",
+  "watch": ["."],
+  "ext": "js,json",
+  "ignore": [
+    "projects/**",
+    "uploads/**",
+    "node_modules/**",
+    "test/**",
+    "**/*.test.js"
+  ],
+  "delay": 500
+}

@@ -18,7 +18,7 @@
           "id": "hello_pty.py_1787068551144_g9lag",
           "name": "hello_pty.py",
           "type": "file",
-          "content": ""
+          "content": "hello"
         }
       ]
     },
@@ -27,6 +27,12 @@
       "name": "README.md",
       "type": "file",
       "content": "# Welcome to your project\n\nStart building something amazing!"
+    },
+    {
+      "id": "index.html_1787072530479_0iwjf",
+      "name": "index.html",
+      "type": "file",
+      "content": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n\r\n<head>\r\n  <meta charset=\"UTF-8\">\r\n  <title>My First Page</title>\r\n</head>\r\n\r\n<body>\r\n  <h1>Hello, World!</h1>\r\n  <p>This is a simple HTML paragraph.</p>\r\n</body>\r\n\r\n</html>"
     }
   ]
 }
