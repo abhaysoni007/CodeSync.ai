@@ -70,7 +70,23 @@ const ProjectRoom = () => {
   // Terminal State
   const [showTerminal, setShowTerminal] = useState(false);
   
+  // The socket lives in state as well as a ref: children (FileExplorer, TerminalPanel, ...) only
+  // learn about it when a render carries it down, and a ref mutation does not re-render.
+  const [socket, setSocket] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  // Cursor position for the status bar. Reading editorRef during render never re-renders, so the
+  // indicator was frozen at "Line 1, Col 1".
+  const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
   const socketRef = useRef(null);
+  const announcedConnect = useRef(false);
+
+  // Handlers registered once must still see the latest values. Refs, not deps: re-running the
+  // connect effect for every file click tore the connection down and killed every terminal.
+  const activeFileRef = useRef(null);
+  const showChatRef = useRef(true);
+  useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
+  useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const decorationsRef = useRef({});
@@ -82,15 +98,23 @@ const ProjectRoom = () => {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
     const token = localStorage.getItem('token');
 
-    socketRef.current = io(API_URL, {
+    const socketInstance = io(API_URL, {
       auth: { token },
       query: { projectId: id },
     });
+    socketRef.current = socketInstance;
+    setSocket(socketInstance);
 
     // Connection events
     socketRef.current.on('connect', () => {
-      console.log('Socket connected:', socketRef.current.id);
-      toast.success('Connected to collaboration server');
+      console.log('Socket connected:', socketInstance.id);
+      setIsConnected(true);
+      // Only announce the first connect. socket.io reconnects on its own after a blip, and a
+      // toast per reconnect is noise, not information.
+      if (!announcedConnect.current) {
+        announcedConnect.current = true;
+        toast.success('Connected to collaboration server');
+      }
       
       // Join project room
       socketRef.current.emit('join-project', { projectId: id, userId: user?.id });
@@ -98,13 +122,18 @@ const ProjectRoom = () => {
 
     socketRef.current.on('disconnect', () => {
       console.log('Socket disconnected');
-      toast.error('Disconnected from server');
+      setIsConnected(false);
+    });
+
+    // A connection that cannot come back is worth telling the user about; a transient drop is not.
+    socketInstance.io.on('reconnect_failed', () => {
+      toast.error('Lost connection to the collaboration server');
     });
 
     // Collaboration events
     socketRef.current.on('code-update', (data) => {
       console.log('Code update received:', data);
-      if (data.fileId === activeFile?._id && data.userId !== user?.id) {
+      if (data.fileId === activeFileRef.current?._id && data.userId !== user?.id) {
         // Set flag to prevent re-emitting this update
         isRemoteUpdateRef.current = true;
         setCode(data.code);
@@ -134,7 +163,7 @@ const ProjectRoom = () => {
 
     socketRef.current.on('cursor-update', (data) => {
       console.log('Cursor update:', data);
-      if (data.userId !== user?.id && data.fileId === activeFile?._id) {
+      if (data.userId !== user?.id && data.fileId === activeFileRef.current?._id) {
         const userColor = data.color || generateUserColor(data.userId);
         
         setCursors(prev => ({
@@ -183,7 +212,7 @@ const ProjectRoom = () => {
       setMessages(prev => [...prev, data]);
       
       // Increment unread count if chat is not visible
-      if (!showChat && data.userId !== user?.id) {
+      if (!showChatRef.current && data.userId !== user?.id) {
         setUnreadMessages(prev => prev + 1);
       }
       
@@ -217,7 +246,8 @@ const ProjectRoom = () => {
     // (see useFileExplorer). ProjectRoom only reacts by clearing the editor if the open file
     // is deleted out from under it.
     socketRef.current.on('filesystem:deleted', ({ path }) => {
-      if (activeFile?.path && path?.join('/') === activeFile.path.join('/')) {
+      const open = activeFileRef.current;
+      if (open?.path && path?.join('/') === open.path.join('/')) {
         setActiveFile(null);
         setCode('');
       }
@@ -233,12 +263,13 @@ const ProjectRoom = () => {
 
     return () => {
       // Cleanup
-      if (socketRef.current) {
-        socketRef.current.emit('leave-project', { projectId: id });
-        socketRef.current.disconnect();
-      }
+      socketInstance.emit('leave-project', { projectId: id });
+      socketInstance.removeAllListeners();
+      socketInstance.disconnect();
+      socketRef.current = null;
+      setSocket(null);
     };
-  }, [id, user, activeFile]);
+  }, [id, user?.id]);
 
   // Load project data
   useEffect(() => {
@@ -446,6 +477,26 @@ const ProjectRoom = () => {
       toast.error('Failed to save file');
     }
   };
+
+  // onMount runs once, so a command registered there closes over the FIRST render's `code` and
+  // would save stale (usually empty) content forever. Go through a ref that always points at the
+  // current handler.
+  const saveRef = useRef(handleSaveFile);
+  saveRef.current = handleSaveFile;
+
+  // Ctrl+S must save the file wherever focus is - clicking the tree or the terminal and hitting
+  // Ctrl+S otherwise opened the browser's "Save page as" dialog.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleTyping = () => {
     if (!socketRef.current || !id) return;
@@ -657,7 +708,7 @@ const ProjectRoom = () => {
           {sidebarView === 'explorer' ? (
             <FileExplorer
               projectId={id}
-              socket={socketRef.current}
+              socket={socket}
               onFileSelect={openFile}
             />
           ) : (
@@ -744,6 +795,7 @@ const ProjectRoom = () => {
                     
                     // Track cursor position changes
                     editor.onDidChangeCursorPosition((e) => {
+                      setCursorPosition({ lineNumber: e.position.lineNumber, column: e.position.column });
                       handleCursorChange({
                         lineNumber: e.position.lineNumber,
                         column: e.position.column,
@@ -766,7 +818,7 @@ const ProjectRoom = () => {
 
                     // Add keyboard shortcut for save (Ctrl+S / Cmd+S)
                     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                      handleSaveFile();
+                      saveRef.current();
                     });
 
                     // Focus editor on mount
@@ -807,9 +859,9 @@ const ProjectRoom = () => {
               {/* Editor Status Bar */}
               <div className="h-6 bg-vscode-panel border-t border-vscode-border flex items-center justify-between px-4 text-xs text-vscode-textMuted">
                 <div className="flex items-center gap-4">
-                  <span>Line {editorRef.current?.getPosition()?.lineNumber || 1}, Col {editorRef.current?.getPosition()?.column || 1}</span>
+                  <span>Line {cursorPosition.lineNumber}, Col {cursorPosition.column}</span>
                   <span className="capitalize">{getFileLanguage(activeFile.name)}</span>
-                  {socketRef.current?.connected && (
+                  {isConnected && (
                     <span className="flex items-center gap-1 text-green-400">
                       <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                       Connected
@@ -840,7 +892,7 @@ const ProjectRoom = () => {
 
         {/* Right Sidebar - Chat & Video */}
         <VideoChatPanel
-          socket={socketRef.current}
+          socket={socket}
           projectId={id}
           user={user}
           onlineUsers={onlineUsers}
@@ -883,14 +935,14 @@ const ProjectRoom = () => {
 
           {/* Timeline Content */}
           <div className="flex-1 overflow-y-auto">
-            <ProjectTimeline projectId={id} socket={socketRef.current} />
+            <ProjectTimeline projectId={id} socket={socket} />
           </div>
         </aside>
       )}
 
       {/* Terminal Panel */}
       <TerminalPanel
-        socket={socketRef.current}
+        socket={socket}
         projectId={id}
         isVisible={showTerminal}
         onToggle={() => setShowTerminal(!showTerminal)}
