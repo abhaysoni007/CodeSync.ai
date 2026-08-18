@@ -8,20 +8,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Premium dark theme — no blue family. Amber accent on a graphite-black neutral scale.
+        // App-wide dark theme, unified with the landing page's Cursor-IDE-inspired system.
         // Keeping the `vscode` key name: every component already references bg-vscode-*,
         // text-vscode-*, border-vscode-* — repointing values here reskins the whole app.
         vscode: {
-          bg: '#0D0F12',
-          sidebar: '#15181D',
-          panel: '#1C2027',
-          border: '#292E38',
-          hover: '#20242C',
-          active: '#3A2A14',
-          text: '#F4F4F5',
-          textMuted: '#A1A1AA',
-          accent: '#E8A855',
-          accentHover: '#F0BE7A',
+          bg: '#0A0A0B',
+          sidebar: '#101012',
+          panel: '#131315',
+          border: '#232326',
+          hover: '#191A1D',
+          active: '#1D1B3A',
+          text: '#EDEDEF',
+          textMuted: '#8A8A8F',
+          accent: '#7C7CFF',
+          accentHover: '#9A9AFF',
           error: '#F87171',
           success: '#22C55E',
           warning: '#FBBF24',

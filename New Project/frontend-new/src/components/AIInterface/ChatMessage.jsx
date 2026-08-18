@@ -18,10 +18,10 @@ const ChatMessage = ({ message }) => {
   };
 
   const getBgColor = () => {
-    if (isUser) return 'bg-[#1C2027]';
+    if (isUser) return 'bg-vscode-panel';
     if (isError) return 'bg-red-900/20 border border-red-900/50';
     if (isAgent) return 'bg-green-900/20 border border-green-900/50';
-    return 'bg-[#0D0F12] border border-[#292E38]';
+    return 'bg-vscode-bg border border-vscode-border';
   };
 
   return (
@@ -61,7 +61,7 @@ const ChatMessage = ({ message }) => {
                         {String(children).replace(/\n$/, '')}
                       </SyntaxHighlighter>
                     ) : (
-                      <code className="bg-[#1C2027] px-1.5 py-0.5 rounded text-sm text-vscode-accent" {...props}>
+                      <code className="bg-vscode-panel px-1.5 py-0.5 rounded text-sm text-vscode-accent" {...props}>
                         {children}
                       </code>
                     );
@@ -82,7 +82,7 @@ const ChatMessage = ({ message }) => {
 
           {/* Metadata */}
           {message.metadata && (
-            <div className="mt-3 pt-3 border-t border-[#292E38] text-xs text-gray-500">
+            <div className="mt-3 pt-3 border-t border-vscode-border text-xs text-gray-500">
               {message.metadata.filesCreated && (
                 <div className="mb-1">
                   <span className="font-semibold">Files Created:</span>{' '}

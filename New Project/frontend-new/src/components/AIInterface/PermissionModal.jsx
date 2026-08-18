@@ -71,11 +71,11 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
         initial={{ scale: 0.9, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.9, y: 20 }}
-        className="bg-[#0D0F12] border border-[#292E38] rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+        className="bg-vscode-bg border border-vscode-border rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-[#292E38] flex items-center justify-between bg-[#15181D]">
+        <div className="px-6 py-4 border-b border-vscode-border flex items-center justify-between bg-vscode-sidebar">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
               <FiAlertCircle className="w-5 h-5 text-yellow-500" />
@@ -107,11 +107,11 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.1 }}
-                className={`bg-[#15181D] border rounded-lg overflow-hidden ${
+                className={`bg-vscode-sidebar border rounded-lg overflow-hidden ${
                   result?.success ? 'border-green-500/50' :
                   result?.denied ? 'border-gray-600' :
                   result?.success === false ? 'border-red-500/50' :
-                  'border-[#292E38]'
+                  'border-vscode-border'
                 }`}
               >
                 {/* Permission Info */}
@@ -121,7 +121,7 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
                       result?.success ? 'bg-green-500/20' :
                       result?.denied ? 'bg-gray-700' :
                       result?.success === false ? 'bg-red-500/20' :
-                      'bg-[#E8A855]/20'
+                      'bg-vscode-accent/20'
                     }`}>
                       {result?.success ? (
                         <FiCheck className="w-4 h-4 text-green-500" />
@@ -130,14 +130,14 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
                       ) : result?.success === false ? (
                         <FiX className="w-4 h-4 text-red-500" />
                       ) : (
-                        <FiTerminal className="w-4 h-4 text-[#E8A855]" />
+                        <FiTerminal className="w-4 h-4 text-vscode-accent" />
                       )}
                     </div>
                     <div className="flex-1">
                       <div className="text-sm font-medium text-gray-300 mb-1">
                         Terminal Command
                       </div>
-                      <code className="text-xs text-vscode-accent bg-[#0D0F12] px-2 py-1 rounded block overflow-x-auto custom-scrollbar">
+                      <code className="text-xs text-vscode-accent bg-vscode-bg px-2 py-1 rounded block overflow-x-auto custom-scrollbar">
                         {permission.target}
                       </code>
                       <div className="text-xs text-gray-500 mt-2">
@@ -175,7 +175,7 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
                       <motion.button
                         onClick={() => handleDeny(permission, index)}
                         disabled={isExecuting}
-                        className="flex-1 px-4 py-2 bg-[#1C2027] hover:bg-[#292E38] text-gray-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="flex-1 px-4 py-2 bg-vscode-panel hover:bg-vscode-border text-gray-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
@@ -194,7 +194,7 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
                         <div>
                           <div className="text-sm text-green-500 font-medium mb-2">✓ Executed successfully</div>
                           {result.output?.output && (
-                            <pre className="text-xs text-gray-400 bg-[#0D0F12] p-2 rounded overflow-x-auto custom-scrollbar max-h-32">
+                            <pre className="text-xs text-gray-400 bg-vscode-bg p-2 rounded overflow-x-auto custom-scrollbar max-h-32">
                               {result.output.output}
                             </pre>
                           )}
@@ -214,10 +214,10 @@ const PermissionModal = ({ permissions, onApprove, onDeny, onComplete }) => {
 
         {/* Footer */}
         {allProcessed && (
-          <div className="px-6 py-4 border-t border-[#292E38] bg-[#15181D]">
+          <div className="px-6 py-4 border-t border-vscode-border bg-vscode-sidebar">
             <motion.button
               onClick={() => onComplete && onComplete()}
-              className="w-full px-4 py-2 bg-[#E8A855] hover:bg-[#F0BE7A] text-[#14110A] rounded-lg font-medium transition-colors"
+              className="w-full px-4 py-2 bg-vscode-accent hover:bg-vscode-accentHover text-vscode-bg rounded-lg font-medium transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >

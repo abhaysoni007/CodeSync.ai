@@ -1108,34 +1108,34 @@ const ProjectRoom = () => {
                   value={code}
                   onChange={handleEditorChange}
                   beforeMount={(monaco) => {
-                    // Custom theme matching the app palette — vs-dark's default blue selection/
-                    // cursor would clash with the amber accent used everywhere else.
+                    // Custom theme matching the app palette — vs-dark's default widget/border
+                    // colors don't match the app's ink/paper/periwinkle system.
                     monaco.editor.defineTheme('codesync-dark', {
                       base: 'vs-dark',
                       inherit: true,
                       rules: [
                         { token: 'comment', foreground: '6B7280', fontStyle: 'italic' },
-                        { token: 'keyword', foreground: 'E8A855' },
+                        { token: 'keyword', foreground: '7C7CFF' },
                         { token: 'string', foreground: '9ECE6A' },
-                        { token: 'number', foreground: 'F0BE7A' },
+                        { token: 'number', foreground: '9A9AFF' },
                       ],
                       colors: {
-                        'editor.background': '#0D0F12',
-                        'editor.foreground': '#F4F4F5',
+                        'editor.background': '#0A0A0B',
+                        'editor.foreground': '#EDEDEF',
                         'editorLineNumber.foreground': '#4B5563',
-                        'editorLineNumber.activeForeground': '#E8A855',
-                        'editor.selectionBackground': '#3A2A1466',
-                        'editor.inactiveSelectionBackground': '#3A2A1433',
-                        'editorCursor.foreground': '#E8A855',
-                        'editor.lineHighlightBackground': '#1C202766',
-                        'editorIndentGuide.background': '#292E38',
+                        'editorLineNumber.activeForeground': '#7C7CFF',
+                        'editor.selectionBackground': '#7C7CFF33',
+                        'editor.inactiveSelectionBackground': '#7C7CFF1A',
+                        'editorCursor.foreground': '#7C7CFF',
+                        'editor.lineHighlightBackground': '#1313154D',
+                        'editorIndentGuide.background': '#232326',
                         'editorIndentGuide.activeBackground': '#4B5563',
-                        'editorWidget.background': '#1C2027',
-                        'editorWidget.border': '#292E38',
-                        'editorSuggestWidget.background': '#1C2027',
-                        'editorSuggestWidget.selectedBackground': '#3A2A14',
-                        'scrollbarSlider.background': '#29303840',
-                        'scrollbarSlider.hoverBackground': '#E8A85540',
+                        'editorWidget.background': '#131315',
+                        'editorWidget.border': '#232326',
+                        'editorSuggestWidget.background': '#131315',
+                        'editorSuggestWidget.selectedBackground': '#1D1B3A',
+                        'scrollbarSlider.background': '#23232640',
+                        'scrollbarSlider.hoverBackground': '#7C7CFF40',
                       },
                     });
                   }}

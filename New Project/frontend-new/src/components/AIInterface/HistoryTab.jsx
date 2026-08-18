@@ -9,7 +9,7 @@ const HistoryTab = ({ history, onClose }) => {
         <h3 className="text-lg font-semibold text-white">History</h3>
         <button
           onClick={onClose}
-          className="p-2 hover:bg-[#1C2027] rounded transition-colors"
+          className="p-2 hover:bg-vscode-panel rounded transition-colors"
         >
           <FiX className="w-4 h-4 text-gray-400" />
         </button>
@@ -29,7 +29,7 @@ const HistoryTab = ({ history, onClose }) => {
                 key={index}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-[#1C2027] p-3 rounded-lg border border-[#292E38] hover:border-[#E8A855] transition-colors cursor-pointer"
+                className="bg-vscode-panel p-3 rounded-lg border border-vscode-border hover:border-vscode-accent transition-colors cursor-pointer"
               >
                 <div className="flex items-start gap-3">
                   <div className="mt-1">

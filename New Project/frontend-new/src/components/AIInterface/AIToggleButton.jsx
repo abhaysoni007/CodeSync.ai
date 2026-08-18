@@ -11,7 +11,7 @@ const AIToggleButton = () => {
       className={`fixed bottom-6 right-6 p-4 rounded-full shadow-2xl transition-all z-40 ${
         isPanelOpen
           ? 'bg-gray-700 hover:bg-gray-600'
-          : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700'
+          : 'bg-vscode-accent hover:bg-vscode-accentHover'
       }`}
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.9 }}

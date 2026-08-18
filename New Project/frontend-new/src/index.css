@@ -19,16 +19,16 @@
 }
 
 .dark {
-  background-color: #0d0f12;
-  color: #f4f4f5;
+  background-color: #0a0a0b;
+  color: #ededef;
   /* Raw CSS custom properties for plain-CSS files (ProjectRoom.css, TerminalPanel.css,
      VideoChatPanel.css) that can't reach Tailwind's config-driven color tokens. */
-  --vscode-bg: #0d0f12;
-  --vscode-panel: #1c2027;
-  --vscode-border: #292e38;
-  --vscode-accent: #e8a855;
-  --vscode-accent-hover: #f0be7a;
-  --vscode-text-muted: #a1a1aa;
+  --vscode-bg: #0a0a0b;
+  --vscode-panel: #131315;
+  --vscode-border: #232326;
+  --vscode-accent: #7c7cff;
+  --vscode-accent-hover: #9a9aff;
+  --vscode-text-muted: #8a8a8f;
 }
 
 @layer base {
@@ -167,7 +167,7 @@
 
 @layer utilities {
   .text-gradient {
-    @apply bg-gradient-to-r from-vscode-accent to-orange-400 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-vscode-accent to-vscode-accentHover bg-clip-text text-transparent;
   }
 
   .no-scrollbar::-webkit-scrollbar {
