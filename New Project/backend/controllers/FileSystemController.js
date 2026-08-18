@@ -65,15 +65,16 @@ const isSafeSegment = (name) =>
   !name.includes('\\');
 
 export const resolveProjectPath = (projectId, pathArray) => {
+  if (!isSafeProjectId(projectId)) throw new Error('Invalid project id');
   const parts = (Array.isArray(pathArray) ? pathArray : []).filter((p) => p !== 'root');
   for (const part of parts) {
-    if (!isSafeSegment(part)) throw new Error(`Unsafe path component: ${part}`);
+    if (!isSafeSegment(part)) throw new Error(`Illegal path segment: ${part}`);
   }
   const root = projectDiskDir(projectId);
   const target = path.join(root, ...parts);
   const rel = path.relative(root, target);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error('Path attempted to escape project directory');
+    throw new Error('Illegal path segment: traversal');
   }
   return { target, parts, root };
 };
@@ -333,10 +334,21 @@ export const deleteFileOrFolder = async (req, res) => {
 };
 
 /**
- * Decode buffer to text safely handling utf-8
+ * Decode buffer to text safely handling utf-8, UTF-8 BOM, UTF-16LE, and UTF-16BE
  */
-const decodeText = (buf) => {
+export const decodeText = (buf) => {
+  if (!buf || !buf.length) return '';
   try {
+    if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+      return buf.subarray(3).toString('utf-8');
+    }
+    if (buf[0] === 0xff && buf[1] === 0xfe) {
+      return buf.subarray(2).toString('utf16le');
+    }
+    if (buf[0] === 0xfe && buf[1] === 0xff) {
+      const swapped = Buffer.from(buf.subarray(2)).swap16();
+      return swapped.toString('utf16le');
+    }
     return buf.toString('utf-8');
   } catch {
     return '';
