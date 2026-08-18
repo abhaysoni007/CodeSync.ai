@@ -21,6 +21,18 @@
       "name": "README.md",
       "type": "file",
       "content": "# Welcome to your project\n\nStart building something amazing!"
+    },
+    {
+      "id": "ll_1787082229962_senhj",
+      "name": "ll",
+      "type": "folder",
+      "children": []
+    },
+    {
+      "id": "4_1787082257874_i6pec",
+      "name": "4",
+      "type": "file",
+      "content": ""
     }
   ]
 }

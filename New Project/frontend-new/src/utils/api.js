@@ -104,6 +104,8 @@ export const api = {
   deleteAPIKey: (provider) => apiClient.delete(`/auth/api-keys/${provider}`),
 
   // Call Sessions (Video)
+  createProjectCallToken: (projectId) => apiClient.post(`/projects/${projectId}/call-token`),
+  /** @deprecated Legacy room-based video calling. Use createProjectCallToken instead. */
   createCallToken: (roomId) => apiClient.post(`/rooms/${roomId}/call-token`),
   endCall: (roomId) => apiClient.post(`/rooms/${roomId}/end-call`),
   getCallHistory: (roomId) => apiClient.get(`/rooms/${roomId}/call-history`),

@@ -1,22 +1,123 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Video, VideoOff, Mic, MicOff, Phone, Users, Send, MessageSquare } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { Room, RoomEvent, ParticipantEvent } from 'livekit-client';
+import { api } from '../utils/api';
 import './VideoChatPanel.css';
 
 /**
- * VideoChatPanel Component - PRODUCTION READY ✅
- * 
- * FIXES IMPLEMENTED:
- * ✅ No duplicate local streams (only 1 video tile per user)
- * ✅ Remote video properly displays (black screen fixed)
- * ✅ Camera toggle actually stops/starts video track (track.enabled)
- * ✅ Microphone toggle actually mutes/unmutes audio track (track.enabled)
- * ✅ Proper cleanup on disconnect (all tracks stopped)
- * ✅ Permission handling with user-friendly errors
- * ✅ No duplicate peer connections
- * ✅ Proper beforeunload cleanup
- * ✅ Chat untouched and working
+ * Generate consistent color for user based on ID
  */
+function generateUserColor(userId) {
+  const colors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+    '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2',
+    '#F8B739', '#52C41A', '#1890FF', '#722ED1'
+  ];
+  if (!userId) return colors[0];
+  const hash = String(userId).split('').reduce((acc, char) => {
+    return char.charCodeAt(0) + ((acc << 5) - acc);
+  }, 0);
+  return colors[Math.abs(hash) % colors.length];
+}
+
+/**
+ * Renders a single participant's video and audio using livekit-client.
+ */
+const ParticipantTile = ({ participant, isLocal, userMapping }) => {
+  const videoRef = useRef(null);
+  const audioRef = useRef(null);
+
+  const [isSpeaking, setIsSpeaking] = useState(participant.isSpeaking);
+  const [hasVideo, setHasVideo] = useState(false);
+  const [hasAudio, setHasAudio] = useState(false);
+
+  useEffect(() => {
+    const attachTracks = () => {
+      let videoTrack = null;
+      let audioTrack = null;
+
+      participant.videoTrackPublications.forEach((pub) => {
+        if (pub.track) videoTrack = pub.track;
+      });
+      participant.audioTrackPublications.forEach((pub) => {
+        if (pub.track) audioTrack = pub.track;
+      });
+
+      setHasVideo(!!videoTrack && !videoTrack.isMuted);
+      setHasAudio(!!audioTrack && !audioTrack.isMuted);
+
+      if (videoTrack && videoRef.current) {
+        videoTrack.attach(videoRef.current);
+      }
+      if (audioTrack && audioRef.current && !isLocal) {
+        audioTrack.attach(audioRef.current);
+      }
+    };
+
+    const handleSpeaking = (speaking) => setIsSpeaking(speaking);
+
+    // Initial attach
+    attachTracks();
+
+    // Listeners
+    participant.on(ParticipantEvent.TrackSubscribed, attachTracks);
+    participant.on(ParticipantEvent.TrackUnsubscribed, attachTracks);
+    participant.on(ParticipantEvent.LocalTrackPublished, attachTracks);
+    participant.on(ParticipantEvent.LocalTrackUnpublished, attachTracks);
+    participant.on(ParticipantEvent.TrackMuted, attachTracks);
+    participant.on(ParticipantEvent.TrackUnmuted, attachTracks);
+    participant.on(ParticipantEvent.IsSpeakingChanged, handleSpeaking);
+
+    return () => {
+      participant.off(ParticipantEvent.TrackSubscribed, attachTracks);
+      participant.off(ParticipantEvent.TrackUnsubscribed, attachTracks);
+      participant.off(ParticipantEvent.LocalTrackPublished, attachTracks);
+      participant.off(ParticipantEvent.LocalTrackUnpublished, attachTracks);
+      participant.off(ParticipantEvent.TrackMuted, attachTracks);
+      participant.off(ParticipantEvent.TrackUnmuted, attachTracks);
+      participant.off(ParticipantEvent.IsSpeakingChanged, handleSpeaking);
+
+      if (videoRef.current) {
+        participant.videoTrackPublications.forEach((pub) => {
+          if (pub.track) pub.track.detach(videoRef.current);
+        });
+      }
+      if (audioRef.current && !isLocal) {
+        participant.audioTrackPublications.forEach((pub) => {
+          if (pub.track) pub.track.detach(audioRef.current);
+        });
+      }
+    };
+  }, [participant, isLocal]);
+
+  const userId = participant.identity;
+  const username = userMapping[userId] || participant.name || 'User';
+
+  return (
+    <div className={`video-wrapper ${isLocal ? 'local' : 'remote'} ${isSpeaking ? 'speaking' : ''}`}>
+      <video ref={videoRef} className="video-element" autoPlay playsInline muted={isLocal} />
+      {!isLocal && <audio ref={audioRef} autoPlay />}
+
+      <div className="video-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>{username} {isLocal && '(You)'}</span>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          {!hasVideo ? <VideoOff style={{ width: '12px', height: '12px', color: '#ff4d4f' }} /> : <Video style={{ width: '12px', height: '12px', color: '#52c41a' }} />}
+          {!hasAudio ? <MicOff style={{ width: '12px', height: '12px', color: '#ff4d4f' }} /> : <Mic style={{ width: '12px', height: '12px', color: '#52c41a' }} />}
+        </div>
+      </div>
+
+      {!hasVideo && (
+        <div className="video-placeholder">
+          <div className="avatar-large" style={{ backgroundColor: generateUserColor(userId) }}>
+            {username[0]?.toUpperCase() || 'U'}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const VideoChatPanel = ({
   socket,
   projectId,
@@ -35,648 +136,228 @@ const VideoChatPanel = ({
   const [isVideoOn, setIsVideoOn] = useState(false);
   const [isAudioOn, setIsAudioOn] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
-  const [remoteStreams, setRemoteStreams] = useState({});
-  const [incomingCall, setIncomingCall] = useState(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  // LiveKit State
+  const [room, setRoom] = useState(null);
+  const [participants, setParticipants] = useState([]);
+  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+
+  // ==================== AUTHORITATIVE CALL STATE ====================
+  const [callState, setCallState] = useState({ active: false, participants: [] });
+  const isParticipant = callState.participants.some(p => p.userId === user?.id);
 
   // ==================== REFS ====================
-  const localVideoRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const peerConnectionsRef = useRef({});
-  const pendingIceRef = useRef({});
   const messagesEndRef = useRef(null);
-  const isInitializingRef = useRef(false);
+  const roomRef = useRef(null);
+  const socketRef = useRef(socket);
+  const projectIdRef = useRef(projectId);
 
-  // ==================== MEDIA STREAM MANAGEMENT ====================
-  
-  /**
-   * Get local media stream with proper error handling
-   * CRITICAL FIX: Always enable tracks when getting stream for call
-   */
-  const getLocalStream = useCallback(async (enableTracks = true) => {
-    // Prevent duplicate initialization
-    if (isInitializingRef.current) {
-      console.log('⏳ Already initializing stream...');
-      return localStreamRef.current;
+  useEffect(() => {
+    roomRef.current = room;
+    socketRef.current = socket;
+    projectIdRef.current = projectId;
+  }, [room, socket, projectId]);
+
+  // Helper map for UI labels
+  const userMapping = {};
+  onlineUsers.forEach(u => {
+    userMapping[u.id] = u.username;
+  });
+  callState.participants.forEach(p => {
+    userMapping[p.userId] = p.username;
+  });
+  if (user) userMapping[user.id] = user.username;
+
+  // ==================== LIVEKIT CONNECTION ====================
+
+  const updateParticipants = useCallback((currentRoom) => {
+    if (!currentRoom) return;
+    const remotes = Array.from(currentRoom.remoteParticipants.values());
+    setParticipants(remotes);
+  }, []);
+
+  const cleanupLiveKit = useCallback((specificRoom = roomRef.current) => {
+    if (specificRoom) {
+      console.log('🧹 Disconnecting LiveKit room');
+      specificRoom.disconnect();
     }
+    setRoom(null);
+    setParticipants([]);
+    setIsInCall(false);
+    setIsVideoOn(false);
+    setIsAudioOn(false);
+    setActiveSpeakerId(null);
+  }, []);
 
-    // Reuse existing stream
-    if (localStreamRef.current && localStreamRef.current.active) {
-      console.log('✅ Reusing existing stream');
-      
-      // Enable tracks if requested
-      if (enableTracks) {
-        localStreamRef.current.getVideoTracks().forEach(track => {
-          track.enabled = true;
-          console.log('✅ Video track enabled');
-        });
-        localStreamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = true;
-          console.log('✅ Audio track enabled');
-        });
-      }
-      
-      return localStreamRef.current;
-    }
-
+  const connectToLiveKit = async () => {
+    if (isConnecting || room) return;
     try {
-      isInitializingRef.current = true;
-      console.log('🎥 Requesting media access...');
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          facingMode: 'user'
+      setIsConnecting(true);
+      console.log('🎬 Requesting LiveKit token for project', projectId);
+      const response = await api.createProjectCallToken(projectId);
+      const { token, url } = response.data.data;
+
+      const newRoom = new Room();
+
+      // Setup Room Listeners
+      newRoom.on(RoomEvent.ParticipantConnected, () => {
+        updateParticipants(newRoom);
+      });
+      newRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
+        updateParticipants(newRoom);
+        toast(`${participant.name || 'A user'} left the call`);
+      });
+      newRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        if (speakers && speakers.length > 0) {
+          setActiveSpeakerId(speakers[0].identity);
+        } else {
+          setActiveSpeakerId(null);
         }
       });
-
-      console.log('✅ Media stream obtained:', {
-        id: stream.id,
-        active: stream.active,
-        videoTracks: stream.getVideoTracks().length,
-        audioTracks: stream.getAudioTracks().length
+      newRoom.on(RoomEvent.Disconnected, () => {
+        cleanupLiveKit(newRoom);
+        toast.error('Disconnected from call');
       });
-      
-      localStreamRef.current = stream;
 
-      // CRITICAL: Enable tracks when starting call
-      if (enableTracks) {
-        stream.getVideoTracks().forEach(track => {
-          track.enabled = true;
-          console.log('✅ Video track enabled:', track.label);
-        });
-        stream.getAudioTracks().forEach(track => {
-          track.enabled = true;
-          console.log('✅ Audio track enabled:', track.label);
-        });
-      }
+      // Force UI re-render when participants toggle media so sorting updates dynamically
+      const forceUpdate = () => updateParticipants(newRoom);
+      newRoom.on(RoomEvent.TrackMuted, forceUpdate);
+      newRoom.on(RoomEvent.TrackUnmuted, forceUpdate);
+      newRoom.on(RoomEvent.TrackPublished, forceUpdate);
+      newRoom.on(RoomEvent.TrackUnpublished, forceUpdate);
+      newRoom.on(RoomEvent.LocalTrackPublished, forceUpdate);
+      newRoom.on(RoomEvent.LocalTrackUnpublished, forceUpdate);
 
-      // Display local video IMMEDIATELY
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.muted = true; // CRITICAL: Mute local playback to avoid echo
-        localVideoRef.current.autoplay = true;
-        localVideoRef.current.playsInline = true;
-        
-        try {
-          await localVideoRef.current.play();
-          console.log('✅ Local video playing');
-        } catch (playErr) {
-          console.warn('⚠️ Autoplay blocked, trying with user gesture:', playErr.message);
-          // Video will play on user interaction
-        }
-      }
+      console.log('🔗 Connecting to LiveKit...', url);
+      await newRoom.connect(url, token);
+      console.log('✅ Connected to LiveKit Room:', newRoom.name);
 
-      return stream;
-    } catch (err) {
-      console.error('❌ Media access error:', err);
-      
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        toast.error('Camera/mic access denied. Please allow permissions.');
-      } else if (err.name === 'NotFoundError') {
-        toast.error('No camera or microphone found.');
-      } else {
-        toast.error(`Media error: ${err.message}`);
-      }
-      
-      throw err;
-    } finally {
-      isInitializingRef.current = false;
-    }
-  }, []);
-
-  /**
-   * Stop local stream completely
-   */
-  const stopLocalStream = useCallback(() => {
-    if (localStreamRef.current) {
-      console.log('🛑 Stopping local stream');
-      localStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-      });
-      localStreamRef.current = null;
-    }
-    
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-  }, []);
-
-  // ==================== PEER CONNECTION MANAGEMENT ====================
-
-  /**
-   * Create RTCPeerConnection for remote user
-   * CRITICAL FIX: Ensure tracks are added with proper enabled state
-   */
-  const createPeerFor = useCallback(async (remoteId, isInitiator = false) => {
-    // Reuse existing connection
-    if (peerConnectionsRef.current[remoteId]) {
-      console.log('♻️ Reusing peer:', remoteId);
-      return peerConnectionsRef.current[remoteId];
-    }
-
-    console.log(`🔗 Creating peer for ${remoteId} (initiator: ${isInitiator})`);
-
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ],
-      iceCandidatePoolSize: 10
-    });
-
-    peerConnectionsRef.current[remoteId] = pc;
-
-    // CRITICAL: Add local tracks with ENABLED state
-    if (localStreamRef.current) {
-      const tracks = localStreamRef.current.getTracks();
-      console.log(`📤 Adding ${tracks.length} tracks to peer connection:`);
-      
-      tracks.forEach(track => {
-        // Ensure track is enabled before adding
-        console.log(`  - ${track.kind}: enabled=${track.enabled}, readyState=${track.readyState}, label=${track.label}`);
-        
-        const sender = pc.addTrack(track, localStreamRef.current);
-        console.log(`  ✅ Added ${track.kind} track, sender:`, sender);
-      });
-    } else {
-      console.error('❌ No local stream available when creating peer connection!');
-    }
-
-    // ICE candidate handler
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        console.log(`🧊 Sending ICE candidate to ${remoteId}`);
-        socket.emit('webrtc:ice-candidate', {
-          to: remoteId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    // Incoming track handler - CRITICAL FOR RECEIVING AUDIO/VIDEO
-    pc.ontrack = (event) => {
-      console.log(`📥 Received ${event.track.kind} track from ${remoteId}:`, {
-        enabled: event.track.enabled,
-        muted: event.track.muted,
-        readyState: event.track.readyState
-      });
-      
-      if (event.streams && event.streams[0]) {
-        const stream = event.streams[0];
-        console.log(`  Stream ID: ${stream.id}, Active: ${stream.active}`);
-        console.log(`  Stream tracks:`, stream.getTracks().map(t => `${t.kind}:${t.enabled}`));
-        
-        setRemoteStreams(prev => ({
-          ...prev,
-          [remoteId]: stream
-        }));
-        
-        const remoteUser = onlineUsers.find(u => u.id === remoteId);
-        toast.success(`Connected to ${remoteUser?.username || 'user'}`);
-      }
-    };
-
-    // Connection state handler
-    pc.onconnectionstatechange = () => {
-      console.log(`🔌 Peer [${remoteId}]:`, pc.connectionState);
-      
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        setTimeout(() => closePeer(remoteId), 1000);
-      } else if (pc.connectionState === 'closed') {
-        closePeer(remoteId);
-      }
-    };
-
-    // Process queued ICE candidates
-    if (pendingIceRef.current[remoteId]?.length > 0) {
-      console.log(`📦 Processing ${pendingIceRef.current[remoteId].length} queued ICE candidates`);
-      for (const candidate of pendingIceRef.current[remoteId]) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.warn('ICE candidate error:', e.message);
-        }
-      }
-      delete pendingIceRef.current[remoteId];
-    }
-
-    return pc;
-  }, [socket, onlineUsers]);
-
-  /**
-   * Close peer connection
-   */
-  const closePeer = useCallback((id) => {
-    console.log(`🗑️ Closing peer: ${id}`);
-    
-    const pc = peerConnectionsRef.current[id];
-    if (pc) {
-      pc.close();
-      delete peerConnectionsRef.current[id];
-    }
-
-    delete pendingIceRef.current[id];
-    
-    setRemoteStreams(prev => {
-      const updated = { ...prev };
-      delete updated[id];
-      return updated;
-    });
-  }, []);
-
-  /**
-   * Close all peers
-   */
-  const closeAllPeers = useCallback(() => {
-    console.log('🗑️ Closing all peers');
-    Object.keys(peerConnectionsRef.current).forEach(closePeer);
-  }, [closePeer]);
-
-  // ==================== SIGNALING HANDLERS ====================
-
-  /**
-   * Handle incoming offer
-   * CRITICAL FIX: Enable tracks when receiving offer
-   */
-  const handleIncomingOffer = useCallback(async (from, offer, username) => {
-    try {
-      console.log(`📨 Incoming offer from ${username} (${from})`);
-      
-      // Get local stream with tracks ENABLED
-      if (!localStreamRef.current) {
-        console.log('📹 Getting local stream for incoming offer...');
-        await getLocalStream(true);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } else {
-        // Enable existing tracks
-        console.log('📹 Enabling existing tracks for incoming offer...');
-        localStreamRef.current.getVideoTracks().forEach(t => {
-          t.enabled = true;
-          console.log('✅ Video track enabled');
-        });
-        localStreamRef.current.getAudioTracks().forEach(t => {
-          t.enabled = true;
-          console.log('✅ Audio track enabled');
-        });
-      }
-
-      console.log('🔗 Creating peer connection for incoming offer...');
-      const pc = await createPeerFor(from, false);
-      
-      console.log('📝 Setting remote description...');
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      console.log('✅ Remote description set');
-      
-      console.log('📝 Creating answer...');
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      console.log('✅ Answer created and local description set');
-
-      console.log('📤 Sending answer to', from);
-      socket?.emit('webrtc:answer', { to: from, answer });
-      
+      setRoom(newRoom);
       setIsInCall(true);
-      setIsVideoOn(true);
-      setIsAudioOn(true);
-      
-      toast.success(`Joined call with ${username}`);
-    } catch (err) {
-      console.error('❌ Error handling offer:', err);
-      toast.error('Failed to join call');
-    }
-  }, [socket, getLocalStream, createPeerFor]);
 
-  // ==================== WEBRTC SOCKET LISTENERS ====================
+      // Attempt to enable camera and mic gracefully
+      let cameraEnabled = false;
+      let micEnabled = false;
+
+      try {
+        await newRoom.localParticipant.setCameraEnabled(true);
+        cameraEnabled = true;
+      } catch (err) {
+        console.warn('Camera failed:', err);
+        toast.error(`Camera failed: ${err.message || 'Unavailable'}`);
+      }
+
+      try {
+        await newRoom.localParticipant.setMicrophoneEnabled(true);
+        micEnabled = true;
+      } catch (err) {
+        console.warn('Mic failed:', err);
+        toast.error(`Microphone failed: ${err.message || 'Unavailable'}`);
+      }
+
+      setIsVideoOn(cameraEnabled);
+      setIsAudioOn(micEnabled);
+      updateParticipants(newRoom);
+
+      toast.success('Joined the call');
+    } catch (error) {
+      console.error('❌ LiveKit Connection Error:', error);
+      toast.error('Failed to connect to video call');
+      cleanupLiveKit();
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // ==================== AUTHORITATIVE CALL LISTENER ====================
 
   useEffect(() => {
     if (!socket) return;
 
-    const handleOffer = async ({ from, offer, username }) => {
-      console.log(`📨 Offer from ${username}`);
-      
-      if (!isInCall && !localStreamRef.current) {
-        setIncomingCall({ from, username, offer });
-      } else {
-        await handleIncomingOffer(from, offer, username);
+    const handleCallState = (state) => {
+      console.log('📡 Call state updated:', state);
+      setCallState(state);
+
+      // Auto-cleanup if server says call is inactive but we think we are in it
+      if (!state.active && roomRef.current) {
+        cleanupLiveKit(roomRef.current);
       }
     };
 
-    const handleAnswer = async ({ from, answer }) => {
-      console.log(`📨 Answer from ${from}`);
-      const pc = peerConnectionsRef.current[from];
-      
-      if (pc && pc.signalingState !== 'stable') {
-        try {
-          await pc.setRemoteDescription(new RTCSessionDescription(answer));
-          
-          // Process queued ICE candidates
-          if (pendingIceRef.current[from]?.length > 0) {
-            for (const candidate of pendingIceRef.current[from]) {
-              await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-            delete pendingIceRef.current[from];
-          }
-        } catch (err) {
-          console.error('❌ Error setting answer:', err);
-        }
-      }
-    };
-
-    const handleIceCandidate = async ({ from, candidate }) => {
-      const pc = peerConnectionsRef.current[from];
-      
-      if (pc && pc.remoteDescription) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.warn('ICE error:', err);
-        }
-      } else {
-        // Queue for later
-        if (!pendingIceRef.current[from]) {
-          pendingIceRef.current[from] = [];
-        }
-        pendingIceRef.current[from].push(candidate);
-      }
-    };
-
-    const handleCallStarted = ({ from, username }) => {
-      console.log(`📞 Call started by ${username}`);
-      
-      if (!isInCall) {
-        setIncomingCall({ from, username });
-        toast(`${username} is calling...`, { duration: 10000, icon: '📞' });
-      }
-    };
-
-    const handleCallEnded = ({ userId, username }) => {
-      console.log(`📵 ${username} left the call`);
-      toast(`${username} left the call`);
-      closePeer(userId);
-    };
-
-    socket.on('webrtc:offer', handleOffer);
-    socket.on('webrtc:answer', handleAnswer);
-    socket.on('webrtc:ice-candidate', handleIceCandidate);
-    socket.on('webrtc:call-started', handleCallStarted);
-    socket.on('webrtc:call-ended', handleCallEnded);
+    socket.on('video:call-state', handleCallState);
+    socket.emit('video:call-state-request', { projectId });
 
     return () => {
-      socket.off('webrtc:offer', handleOffer);
-      socket.off('webrtc:answer', handleAnswer);
-      socket.off('webrtc:ice-candidate', handleIceCandidate);
-      socket.off('webrtc:call-started', handleCallStarted);
-      socket.off('webrtc:call-ended', handleCallEnded);
+      socket.off('video:call-state', handleCallState);
     };
-  }, [socket, isInCall, handleIncomingOffer, closePeer]);
+  }, [socket, projectId, cleanupLiveKit]);
 
   // ==================== CLEANUP ON UNMOUNT ====================
 
   useEffect(() => {
-    const cleanup = () => {
-      console.log('🧹 Component cleanup');
-      closeAllPeers();
-      stopLocalStream();
+    const handleUnload = () => {
+      if (roomRef.current) {
+        socketRef.current?.emit('video:call-leave', { projectId: projectIdRef.current });
+        roomRef.current.disconnect();
+      }
     };
 
-    // Cleanup on tab close
-    window.addEventListener('beforeunload', cleanup);
-    
+    window.addEventListener('beforeunload', handleUnload);
     return () => {
-      cleanup();
-      window.removeEventListener('beforeunload', cleanup);
+      window.removeEventListener('beforeunload', handleUnload);
+      handleUnload();
     };
-  }, [closeAllPeers, stopLocalStream]);
+  }, []);
 
   // ==================== CALL ACTIONS ====================
 
-  /**
-   * Start a call
-   * CRITICAL FIX: Enable tracks BEFORE creating peer connections
-   */
   const startCall = async () => {
-    try {
-      console.log('🎬 Starting call...');
-      
-      // Get stream with tracks ENABLED
-      const stream = await getLocalStream(true);
-      if (!stream) {
-        console.error('❌ Failed to get local stream');
-        toast.error('Could not access camera/microphone');
-        return;
-      }
-      
-      // Verify tracks are enabled
-      console.log('📹 Local stream tracks after getLocalStream:');
-      stream.getTracks().forEach(track => {
-        console.log(`  ${track.kind}: enabled=${track.enabled}, readyState=${track.readyState}`);
-      });
-      
-      // Wait for stream to be ready
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setIsInCall(true);
-      setIsVideoOn(true);
-      setIsAudioOn(true);
-
-      // Notify others that call started
-      socket?.emit('webrtc:call-started', { projectId });
-
-      // Create offers for all online users
-      const otherUsers = onlineUsers.filter(u => u.id !== user?.id);
-      console.log(`👥 Creating offers for ${otherUsers.length} users:`, otherUsers.map(u => u.username));
-      
-      for (const onlineUser of otherUsers) {
-        try {
-          console.log(`\n🔗 Creating peer connection for ${onlineUser.username} (${onlineUser.id})`);
-          const pc = await createPeerFor(onlineUser.id, true);
-          
-          console.log('📝 Creating offer...');
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-          });
-          
-          await pc.setLocalDescription(offer);
-          console.log('✅ Local description set');
-          
-          socket?.emit('webrtc:offer', {
-            to: onlineUser.id,
-            offer
-          });
-          
-          console.log(`📤 Offer sent to ${onlineUser.username}`);
-        } catch (err) {
-          console.error(`❌ Error creating offer for ${onlineUser.username}:`, err);
-          toast.error(`Could not connect to ${onlineUser.username}`);
-        }
-      }
-
-      toast.success('Call started - Camera and mic active');
-    } catch (err) {
-      console.error('❌ Error starting call:', err);
-      setIsInCall(false);
-      toast.error('Failed to start call');
-    }
+    socket?.emit('video:call-start', { projectId });
+    await connectToLiveKit();
   };
 
-  /**
-   * Accept incoming call
-   * CRITICAL FIX: Enable tracks when accepting
-   */
   const acceptCall = async () => {
-    try {
-      console.log('✅ Accepting call from:', incomingCall?.username);
-      
-      // Get stream with tracks ENABLED
-      if (!localStreamRef.current) {
-        await getLocalStream(true);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } else {
-        // Enable existing tracks
-        localStreamRef.current.getVideoTracks().forEach(t => {
-          t.enabled = true;
-          console.log('✅ Video track enabled');
-        });
-        localStreamRef.current.getAudioTracks().forEach(t => {
-          t.enabled = true;
-          console.log('✅ Audio track enabled');
-        });
-      }
-      
-      setIsInCall(true);
-      setIsVideoOn(true);
-      setIsAudioOn(true);
-      
-      // Process stored offer
-      if (incomingCall?.offer) {
-        await handleIncomingOffer(incomingCall.from, incomingCall.offer, incomingCall.username);
-      }
-      
-      // Notify others
-      socket?.emit('webrtc:call-started', { projectId });
-      
-      // Send offers to other users
-      const otherUsers = onlineUsers.filter(u => u.id !== user?.id);
-      for (const onlineUser of otherUsers) {
-        if (!peerConnectionsRef.current[onlineUser.id]) {
-          const pc = await createPeerFor(onlineUser.id, true);
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-          });
-          await pc.setLocalDescription(offer);
-          socket?.emit('webrtc:offer', { to: onlineUser.id, offer });
-        }
-      }
-      
-      setIncomingCall(null);
-      toast.success('Joined the call');
-    } catch (err) {
-      console.error('❌ Error accepting call:', err);
-      toast.error('Failed to join call');
-    }
+    socket?.emit('video:call-join', { projectId });
+    await connectToLiveKit();
   };
 
-  /**
-   * Decline incoming call
-   */
-  const declineCall = () => {
-    console.log('📵 Declining call');
-    setIncomingCall(null);
-    toast('Call declined', { icon: '📵' });
-  };
-
-  /**
-   * End the call
-   */
   const endCall = () => {
     console.log('📵 Ending call');
-    
-    // Notify others
-    socket?.emit('webrtc:end-call', {
-      projectId,
-      userId: user?.id,
-      username: user?.username
-    });
-
-    // Cleanup
-    closeAllPeers();
-    stopLocalStream();
-    
-    setIsInCall(false);
-    setIsVideoOn(false);
-    setIsAudioOn(false);
-    setRemoteStreams({});
-    setIncomingCall(null);
-    
+    socket?.emit('video:call-leave', { projectId });
+    cleanupLiveKit();
     toast.success('Call ended');
   };
 
   // ==================== MEDIA CONTROLS ====================
 
-  /**
-   * Toggle video track
-   */
-  const toggleVideo = () => {
-    if (localStreamRef.current) {
-      const videoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoOn(videoTrack.enabled);
-        toast(videoTrack.enabled ? 'Camera on' : 'Camera off', {
-          icon: videoTrack.enabled ? '📹' : '📷',
-          duration: 2000
-        });
-      }
-    } else {
-      setIsVideoOn(!isVideoOn);
+  const toggleVideo = async () => {
+    if (!room) return;
+    try {
+      const newState = !isVideoOn;
+      await room.localParticipant.setCameraEnabled(newState);
+      setIsVideoOn(newState);
+      toast(newState ? 'Camera on' : 'Camera off', { icon: newState ? '📹' : '📷', duration: 2000 });
+    } catch (err) {
+      console.error('Toggle video error:', err);
+      toast.error(`Camera error: ${err.message || 'Could not access camera'}`);
     }
   };
 
-  /**
-   * Toggle audio track
-   */
-  const toggleAudio = () => {
-    if (localStreamRef.current) {
-      const audioTrack = localStreamRef.current.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsAudioOn(audioTrack.enabled);
-        toast(audioTrack.enabled ? 'Mic unmuted' : 'Mic muted', {
-          icon: audioTrack.enabled ? '🎤' : '🔇',
-          duration: 2000
-        });
-      }
-    } else {
-      setIsAudioOn(!isAudioOn);
+  const toggleAudio = async () => {
+    if (!room) return;
+    try {
+      const newState = !isAudioOn;
+      await room.localParticipant.setMicrophoneEnabled(newState);
+      setIsAudioOn(newState);
+      toast(newState ? 'Mic unmuted' : 'Mic muted', { icon: newState ? '🎤' : '🔇', duration: 2000 });
+    } catch (err) {
+      console.error('Toggle audio error:', err);
+      toast.error('Could not access microphone');
     }
   };
 
   // ==================== HELPER FUNCTIONS ====================
-
-  const generateUserColor = (userId) => {
-    const colors = [
-      '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
-      '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2',
-      '#F8B739', '#52C41A', '#1890FF', '#722ED1'
-    ];
-
-    if (!userId) return colors[0];
-
-    const hash = userId.split('').reduce((acc, char) => {
-      return char.charCodeAt(0) + ((acc << 5) - acc);
-    }, 0);
-
-    return colors[Math.abs(hash) % colors.length];
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -692,7 +373,32 @@ const VideoChatPanel = ({
     }
   }, [messages, showChat]);
 
-  // ==================== RENDER ====================
+  // ==================== RENDER LAYOUT ====================
+
+  // Feed layout logic (Instagram style)
+  let allParticipants = [];
+  if (room) {
+    allParticipants = [room.localParticipant, ...participants];
+    
+    // Sort participants: speaking first, then active media, then local user, then others
+    allParticipants.sort((a, b) => {
+      // 1. Speaking
+      if (a.isSpeaking && !b.isSpeaking) return -1;
+      if (!a.isSpeaking && b.isSpeaking) return 1;
+      
+      // 2. Has Camera or Mic enabled
+      const aActive = a.isCameraEnabled || a.isMicrophoneEnabled;
+      const bActive = b.isCameraEnabled || b.isMicrophoneEnabled;
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      
+      // 3. Local participant preferred
+      if (a === room.localParticipant) return -1;
+      if (b === room.localParticipant) return 1;
+      
+      return 0;
+    });
+  }
 
   return (
     <aside className="w-80 bg-vscode-panel border-l border-vscode-border flex flex-col video-chat-panel">
@@ -722,7 +428,6 @@ const VideoChatPanel = ({
       {/* Chat Panel */}
       {showChat && (
         <div className="chat-container">
-          {/* Messages */}
           <div className="messages-list">
             {messages.length === 0 ? (
               <div className="empty-state">
@@ -808,97 +513,40 @@ const VideoChatPanel = ({
       {/* Video Panel */}
       {!showChat && (
         <div className="video-container">
-          {/* Incoming Call Notification */}
-          {incomingCall && !isInCall && (
-            <div className="incoming-call-notification">
-              <div className="incoming-call-content">
-                <Video className="incoming-call-icon" />
-                <h3>{incomingCall.username} is calling...</h3>
-                <p>Video Call</p>
-                <div className="incoming-call-actions">
-                  <button onClick={acceptCall} className="accept-call-button">
-                    <Phone className="w-5 h-5" />
-                    Accept
-                  </button>
-                  <button onClick={declineCall} className="decline-call-button">
-                    <Phone className="w-5 h-5 rotate-135" />
-                    Decline
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {!isInCall ? (
+          {!callState.active ? (
             <div className="video-empty-state">
               <Video className="video-icon" />
               <h3>Video Call</h3>
               <p>Start a video call with your team</p>
-              <button onClick={startCall} className="start-call-button">
+              <button onClick={startCall} disabled={isConnecting} className="start-call-button">
                 <Video className="w-4 h-4" />
-                Start Call
+                {isConnecting ? 'Starting...' : 'Start Call'}
+              </button>
+            </div>
+          ) : !isParticipant && !isInCall ? (
+            <div className="video-empty-state">
+              <Video className="video-icon" />
+              <h3>Active Video Call</h3>
+              <p>{callState.participants.length} {callState.participants.length === 1 ? 'person is' : 'people are'} in the call</p>
+              <button onClick={acceptCall} disabled={isConnecting} className="start-call-button">
+                <Phone className="w-4 h-4" />
+                {isConnecting ? 'Joining...' : 'Join Call'}
               </button>
             </div>
           ) : (
             <>
-              <div className="video-grid">
-                {/* Remote Videos - Show FIRST */}
-                {Object.entries(remoteStreams).map(([userId, stream]) => {
-                  const remoteUser = onlineUsers.find(u => u.id === userId);
-                  const hasVideoTrack = stream.getVideoTracks().length > 0;
-                  const isVideoEnabled = hasVideoTrack && stream.getVideoTracks()[0].enabled;
-                  
-                  return (
-                    <div key={userId} className="video-wrapper remote">
-                      <video
-                        ref={el => {
-                          if (el && stream && el.srcObject !== stream) {
-                            el.srcObject = stream;
-                            el.play().catch(err => console.error('Remote video play error:', err));
-                          }
-                        }}
-                        autoPlay
-                        playsInline
-                        className="video-element"
-                      />
-                      <div className="video-label">
-                        {remoteUser?.username || 'Unknown User'}
-                        {!isVideoEnabled && ' (Camera Off)'}
-                      </div>
-                      {!isVideoEnabled && (
-                        <div className="video-placeholder">
-                          <div className="avatar-large" style={{ backgroundColor: generateUserColor(userId) }}>
-                            {remoteUser?.username?.[0]?.toUpperCase() || 'U'}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Local Video - Show LAST */}
-                <div className="video-wrapper local">
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="video-element"
+              <div className="video-grid sf-grid-feed">
+                {allParticipants.map(p => (
+                  <ParticipantTile 
+                    key={p.identity} 
+                    participant={p} 
+                    isLocal={p === room?.localParticipant} 
+                    userMapping={userMapping} 
                   />
-                  <div className="video-label">
-                    You {!isVideoOn && '(Camera Off)'}
-                  </div>
-                  {!isVideoOn && (
-                    <div className="video-placeholder">
-                      <div className="avatar-large" style={{ backgroundColor: generateUserColor(user?.id) }}>
-                        {user?.username?.[0]?.toUpperCase()}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                ))}
 
-                {/* Waiting State */}
-                {Object.keys(remoteStreams).length === 0 && (
+                {/* Waiting State if alone */}
+                {participants.length === 0 && (
                   <div className="waiting-state">
                     <Users className="waiting-icon" />
                     <p>Waiting for others to join...</p>
@@ -913,11 +561,7 @@ const VideoChatPanel = ({
                   className={`control-button ${!isVideoOn ? 'off' : ''}`}
                   title={isVideoOn ? 'Turn off camera' : 'Turn on camera'}
                 >
-                  {isVideoOn ? (
-                    <Video className="w-5 h-5" />
-                  ) : (
-                    <VideoOff className="w-5 h-5" />
-                  )}
+                  {isVideoOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
                 </button>
 
                 <button
@@ -925,11 +569,7 @@ const VideoChatPanel = ({
                   className={`control-button ${!isAudioOn ? 'off' : ''}`}
                   title={isAudioOn ? 'Mute microphone' : 'Unmute microphone'}
                 >
-                  {isAudioOn ? (
-                    <Mic className="w-5 h-5" />
-                  ) : (
-                    <MicOff className="w-5 h-5" />
-                  )}
+                  {isAudioOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
                 </button>
 
                 <button

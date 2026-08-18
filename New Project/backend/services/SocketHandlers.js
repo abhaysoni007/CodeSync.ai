@@ -13,6 +13,25 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 // Debounce helper for activity logging
 const activityDebounce = new Map();
 
+// Active calls state tracking (project-scoped)
+const projectCalls = new Map(); // projectId -> { active: boolean, participants: Map<userId, {userId, username}> }
+
+const getProjectCallState = (projectId) => {
+  if (!projectCalls.has(projectId)) {
+    return { active: false, participants: [] };
+  }
+  const call = projectCalls.get(projectId);
+  return {
+    active: call.active,
+    participants: Array.from(call.participants.values())
+  };
+};
+
+const broadcastCallState = (io, projectId) => {
+  const state = getProjectCallState(projectId);
+  io.to(`project:${projectId}`).emit('video:call-state', state);
+};
+
 /**
  * Helper function to log activity and broadcast in real-time
  */
@@ -330,6 +349,20 @@ export const setupYjsHandlers = (io) => {
       if (socket.currentProject) {
         const projectRoom = `project:${socket.currentProject}`;
         
+        // Remove from active call if present
+        const call = projectCalls.get(socket.currentProject);
+        if (call && call.active && call.participants.has(socket.userId)) {
+          call.participants.delete(socket.userId);
+          if (call.participants.size === 0) {
+            projectCalls.delete(socket.currentProject);
+            io.to(projectRoom).emit('video:call-ended', {
+              userId: socket.userId,
+              username: socket.username
+            });
+          }
+          broadcastCallState(io, socket.currentProject);
+        }
+        
         // Check if user has other active sockets in the same project
         const sockets = await io.in(projectRoom).fetchSockets();
         const userStillInProject = sockets.some(s => 
@@ -569,6 +602,21 @@ export const setupYjsHandlers = (io) => {
     socket.on('leave-project', async ({ projectId }) => {
       try {
         const projectRoom = `project:${projectId}`;
+        
+        // Remove from active call if present
+        const call = projectCalls.get(projectId);
+        if (call && call.active && call.participants.has(socket.userId)) {
+          call.participants.delete(socket.userId);
+          if (call.participants.size === 0) {
+            projectCalls.delete(projectId);
+            io.to(projectRoom).emit('video:call-ended', {
+              userId: socket.userId,
+              username: socket.username
+            });
+          }
+          broadcastCallState(io, projectId);
+        }
+
         socket.leave(projectRoom);
 
         // Broadcast user left
@@ -880,62 +928,55 @@ export const setupYjsHandlers = (io) => {
     });
 
     /**
-     * WebRTC Signaling Events
+     * Video Call State Events
      */
-    socket.on('webrtc:call-started', ({ projectId }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('webrtc:call-started', {
-        from: socket.userId,
-        username: socket.username
-      });
+    socket.on('video:call-state-request', ({ projectId }) => {
+      if (!projectId) return;
+      socket.emit('video:call-state', getProjectCallState(projectId));
     });
 
-    socket.on('webrtc:offer', ({ to, offer }) => {
-      console.log(`WebRTC offer from ${socket.username} to ${to}`);
-      // Find target socket by userId
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:offer', {
-          from: socket.userId,
-          offer,
+    socket.on('video:call-start', ({ projectId }) => {
+      if (!projectId || socket.currentProject !== projectId) return; // Verify membership
+      
+      if (!projectCalls.has(projectId) || !projectCalls.get(projectId).active) {
+        const participants = new Map();
+        participants.set(socket.userId, { userId: socket.userId, username: socket.username });
+        projectCalls.set(projectId, { active: true, participants });
+        
+        broadcastCallState(io, projectId);
+        io.to(`project:${projectId}`).emit('video:call-started', {
+          userId: socket.userId,
           username: socket.username
         });
       }
     });
 
-    socket.on('webrtc:answer', ({ to, answer }) => {
-      console.log(`WebRTC answer from ${socket.username} to ${to}`);
-      // Find target socket by userId
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:answer', {
-          from: socket.userId,
-          answer
-        });
+    socket.on('video:call-join', ({ projectId }) => {
+      if (!projectId || socket.currentProject !== projectId) return; // Verify membership
+      
+      const call = projectCalls.get(projectId);
+      if (call && call.active) {
+        call.participants.set(socket.userId, { userId: socket.userId, username: socket.username });
+        broadcastCallState(io, projectId);
       }
     });
 
-    socket.on('webrtc:ice-candidate', ({ to, candidate }) => {
-      console.log(`ICE candidate from ${socket.username} to ${to}`);
-      // Find target socket by userId
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:ice-candidate', {
-          from: socket.userId,
-          candidate
-        });
+    socket.on('video:call-leave', ({ projectId }) => {
+      if (!projectId || socket.currentProject !== projectId) return;
+      
+      const call = projectCalls.get(projectId);
+      if (call && call.active) {
+        call.participants.delete(socket.userId);
+        
+        if (call.participants.size === 0) {
+          projectCalls.delete(projectId);
+          io.to(`project:${projectId}`).emit('video:call-ended', {
+            userId: socket.userId,
+            username: socket.username
+          });
+        }
+        broadcastCallState(io, projectId);
       }
-    });
-
-    socket.on('webrtc:end-call', ({ projectId, userId, username }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('webrtc:call-ended', {
-        userId: userId || socket.userId,
-        username: username || socket.username
-      });
     });
   });
 };
