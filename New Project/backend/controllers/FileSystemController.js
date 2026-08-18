@@ -63,15 +63,56 @@ const SEED = {
   'src/index.js': '// Start coding here\nconsole.log("Hello World!");\n',
 };
 
+/**
+ * Projects created before the disk rewrite exist only as a JSON tree in
+ * uploads/file-structures/<id>.json. Their directory may never have been written (the mirror only
+ * ran when a terminal opened), so a straight switch to reading disk would show those users an
+ * empty - or seed-filled - workspace and quietly strand their files. Write the legacy tree out
+ * once, the first time the directory is needed.
+ */
+const LEGACY_STRUCTURES = path.join(process.cwd(), 'uploads', 'file-structures');
+
+const writeLegacyTree = async (node, dir) => {
+  for (const child of node.children || []) {
+    const name = child.name;
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) continue;
+    const target = path.join(dir, name);
+    if (child.type === 'folder') {
+      await ensureDir(target);
+      await writeLegacyTree(child, target);
+    } else {
+      await fs.writeFile(target, child.content || '', 'utf-8');
+    }
+  }
+};
+
+const restoreLegacyProject = async (projectId, dir) => {
+  const legacyPath = path.join(LEGACY_STRUCTURES, `${projectId}.json`);
+  try {
+    const tree = JSON.parse(await fs.readFile(legacyPath, 'utf-8'));
+    if (!tree?.children?.length) return false;
+    await writeLegacyTree(tree, dir);
+    console.log(`[Filesystem] migrated legacy tree for ${projectId}`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const ensureProjectDir = async (projectId) => {
   const dir = projectDiskDir(projectId);
-  const fresh = !fsSync.existsSync(dir);
+  const fresh = !fsSync.existsSync(dir) || (await fs.readdir(dir)).length === 0;
   await ensureDir(dir);
+
   if (fresh) {
-    for (const [rel, content] of Object.entries(SEED)) {
-      const target = path.join(dir, ...rel.split('/'));
-      await ensureDir(path.dirname(target));
-      await fs.writeFile(target, content, 'utf-8');
+    // An existing project's own files always win over the starter template.
+    const migrated = await restoreLegacyProject(projectId, dir);
+    if (!migrated) {
+      for (const [rel, content] of Object.entries(SEED)) {
+        const target = path.join(dir, ...rel.split('/'));
+        await ensureDir(path.dirname(target));
+        await fs.writeFile(target, content, 'utf-8');
+      }
     }
   }
   return dir;
