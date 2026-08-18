@@ -1,10 +1,24 @@
 import express from 'express';
-import { body } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import User from '../models/User.js';
 import { generateTokens } from '../utils/jwt.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// WHY: the validation chains below only *collect* errors; without this the router accepted
+// malformed emails and short passwords and let them hit the database.
+const rejectInvalid = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: errors.array()[0].msg,
+      errors: errors.array()
+    });
+  }
+  next();
+};
 
 /**
  * @route   POST /auth/signup OR /auth/register
@@ -65,8 +79,8 @@ const registerValidation = [
   body('fullName').optional().trim()
 ];
 
-router.post('/signup', registerValidation, registerHandler);
-router.post('/register', registerValidation, registerHandler);
+router.post('/signup', registerValidation, rejectInvalid, registerHandler);
+router.post('/register', registerValidation, rejectInvalid, registerHandler);
 
 /**
  * @route   POST /auth/login
@@ -76,7 +90,7 @@ router.post('/register', registerValidation, registerHandler);
 router.post('/login', [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
+], rejectInvalid, async (req, res) => {
   try {
     const { email, password } = req.body;
 
