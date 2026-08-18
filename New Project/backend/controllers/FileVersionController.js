@@ -6,6 +6,7 @@ import FileVersion from '../models/FileVersion.js';
 import Project from '../models/Project.js';
 import { calculateHash, generateUnifiedDiff, getDiffStats } from '../utils/diffUtil.js';
 import { resolveProjectPath } from './FileSystemController.js';
+import { isProjectMember } from '../middleware/projectAccess.js';
 
 /**
  * File Version Controller
@@ -30,22 +31,18 @@ const resolveFile = async (id, req) => {
 };
 
 /**
- * Check if user has permission to access project
+ * Check if user has permission to access project (Fail-closed authorization check)
  */
 const authorizeProjectAccess = async (projectId, userId) => {
-  if (!projectId || !userId) return true;
+  if (!projectId || !userId) return false;
   if (!mongoose.Types.ObjectId.isValid(projectId) || !mongoose.Types.ObjectId.isValid(userId)) {
-    return true; // Bypass for non-ObjectId test environments
+    return process.env.NODE_ENV === 'test';
   }
   try {
-    const project = await Project.findById(projectId);
-    if (!project) return false;
-    if (project.ownerId && project.ownerId.toString() === userId.toString()) return true;
-    if (project.members && project.members.some(m => m.userId && m.userId.toString() === userId.toString())) return true;
-    if (project.settings && project.settings.isPublic) return true;
-    return false;
+    return await isProjectMember(projectId, userId);
   } catch (err) {
-    return true;
+    console.error('Project access check error:', err);
+    return false;
   }
 };
 
@@ -186,16 +183,18 @@ export const saveSnapshot = async (req, res) => {
       await savedVersion.populate('createdBy', 'username email avatar');
     }
 
-    // Emit Socket.IO event
+    // Emit Socket.IO events across both room namespaces
     const io = req.app.get('io');
     if (io) {
-      io.to(file.projectId.toString()).emit('version:created', {
-        projectId: file.projectId,
-        fileId: file._id,
+      const payload = {
+        projectId: file.projectId.toString(),
+        fileId: file._id.toString(),
         versionNumber: savedVersion.versionNumber,
         action: 'save',
         version: savedVersion
-      });
+      };
+      io.to(file.projectId.toString()).emit('version:created', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('version:created', payload);
     }
 
     res.status(201).json({
@@ -386,9 +385,36 @@ export const revertToVersion = async (req, res) => {
     const oldContent = file.content || '';
     const newContent = targetVersion.content;
 
-    const latestVersion = await FileVersion.findOne({ fileId: file._id })
+    let latestVersion = await FileVersion.findOne({ fileId: file._id })
       .sort({ versionNumber: -1 })
       .limit(1);
+
+    // If active file content has unsaved edits relative to latest snapshot, auto-save a pre-restore backup
+    const oldHash = calculateHash(oldContent);
+    if (latestVersion && latestVersion.contentHash !== oldHash && oldContent.trim().length > 0) {
+      const backupVersionNumber = latestVersion.versionNumber + 1;
+      const backupStats = getDiffStats(latestVersion.content || '', oldContent);
+      const backupVersion = new FileVersion({
+        fileId: file._id,
+        versionNumber: backupVersionNumber,
+        content: oldContent,
+        contentHash: oldHash,
+        diff: generateUnifiedDiff(latestVersion.content || '', oldContent, `v${latestVersion.versionNumber}`, 'Pre-restore backup'),
+        createdBy: req.userId,
+        message: 'Auto-saved pre-restore backup',
+        size: Buffer.byteLength(oldContent, 'utf8'),
+        isAutoSave: true,
+        tags: ['auto-save', 'pre-restore'],
+        metadata: {
+          linesAdded: backupStats.linesAdded,
+          linesRemoved: backupStats.linesRemoved,
+          charactersAdded: backupStats.charactersAdded,
+          charactersRemoved: backupStats.charactersRemoved
+        }
+      });
+      await backupVersion.save();
+      latestVersion = backupVersion;
+    }
 
     const newVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
     const stats = getDiffStats(oldContent, newContent);
@@ -431,18 +457,23 @@ export const revertToVersion = async (req, res) => {
     // Sync disk file content
     await updateDiskFileContent(file.projectId.toString(), file.path, newContent);
 
-    // Emit Socket.IO event
+    // Emit Socket.IO events across both room namespaces
     const io = req.app.get('io');
     if (io) {
-      io.to(file.projectId.toString()).emit('version:created', {
-        projectId: file.projectId,
-        fileId: file._id,
+      const payload = {
+        projectId: file.projectId.toString(),
+        fileId: file._id.toString(),
+        path: file.path.split('/'),
         versionNumber: newVersionNumber,
         action: 'restore',
         restoredFromVersion: parseInt(versionNumber),
         version: revertVersion,
         content: newContent
-      });
+      };
+      io.to(file.projectId.toString()).emit('version:created', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('version:created', payload);
+      io.to(file.projectId.toString()).emit('file_updated', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('file_updated', payload);
     }
 
     res.json({

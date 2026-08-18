@@ -188,19 +188,22 @@ export const buildTree = async (dir, prefix = []) => {
   const children = [];
   for (const entry of entries) {
     const rel = [...prefix, entry.name];
+    const uniqueId = rel.join('/');
     if (entry.isDirectory()) {
       const node = {
-        id: entry.name,
+        id: uniqueId,
         name: entry.name,
         type: 'folder',
+        path: rel,
         children: NO_DESCEND.has(entry.name) ? [] : await buildTree(path.join(dir, entry.name), rel),
       };
       children.push(node);
     } else {
       children.push({
-        id: entry.name,
+        id: uniqueId,
         name: entry.name,
         type: 'file',
+        path: rel,
       });
     }
   }
