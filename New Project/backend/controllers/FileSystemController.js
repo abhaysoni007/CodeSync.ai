@@ -172,7 +172,7 @@ const writeDefaultProjectFiles = async (dir) => {
   }
 };
 
-const buildTree = async (dir, prefix = []) => {
+export const buildTree = async (dir, prefix = []) => {
   let entries = [];
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });

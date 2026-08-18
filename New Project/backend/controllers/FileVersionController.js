@@ -1,9 +1,11 @@
+import fs from 'fs/promises';
+import path from 'path';
 import mongoose from 'mongoose';
 import File from '../models/File.js';
 import FileVersion from '../models/FileVersion.js';
 import Project from '../models/Project.js';
 import { calculateHash, generateUnifiedDiff, getDiffStats } from '../utils/diffUtil.js';
-import { loadStructure, saveStructure } from './FileSystemController.js';
+import { resolveProjectPath } from './FileSystemController.js';
 
 /**
  * File Version Controller
@@ -48,25 +50,16 @@ const authorizeProjectAccess = async (projectId, userId) => {
 };
 
 /**
- * Update JSON filesystem structure node content when file is restored
+ * Update disk file content when a file is restored or saved
  */
-const updateJsonStructureNode = async (projectId, filePath, newContent) => {
+const updateDiskFileContent = async (projectId, filePath, newContent) => {
   try {
     if (!projectId || !filePath) return;
-    const structure = await loadStructure(projectId);
-    const pathParts = filePath.split('/');
-    
-    let current = structure;
-    for (const part of pathParts) {
-      if (!current || !current.children) break;
-      current = current.children.find(child => child.name === part || child.id === part);
-    }
-    if (current && current.type === 'file') {
-      current.content = newContent;
-      await saveStructure(projectId, structure);
-    }
+    const { target } = resolveProjectPath(projectId, filePath.split('/'));
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, newContent || '', 'utf-8');
   } catch (err) {
-    console.error('Error updating JSON structure node:', err);
+    console.warn('[FileVersionController] Disk file update skipped:', err.message);
   }
 };
 
@@ -186,8 +179,8 @@ export const saveSnapshot = async (req, res) => {
     }
     await file.save();
 
-    // Sync JSON filesystem structure on disk
-    await updateJsonStructureNode(file.projectId.toString(), file.path, newContent);
+    // Sync disk file content
+    await updateDiskFileContent(file.projectId.toString(), file.path, newContent);
 
     if (savedVersion.populate) {
       await savedVersion.populate('createdBy', 'username email avatar');
@@ -435,8 +428,8 @@ export const revertToVersion = async (req, res) => {
     }
     await file.save();
 
-    // Sync JSON filesystem structure on disk
-    await updateJsonStructureNode(file.projectId.toString(), file.path, newContent);
+    // Sync disk file content
+    await updateDiskFileContent(file.projectId.toString(), file.path, newContent);
 
     // Emit Socket.IO event
     const io = req.app.get('io');
