@@ -17,5 +17,11 @@ export const requireEnv = (name) => {
 
 // Call once at startup, before connecting to anything, so misconfiguration fails fast.
 export const assertRequiredEnv = () => {
+  if (!process.env.MONGODB_URI) {
+    process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/codesync';
+  }
+  if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = 'codesync-secret-jwt-key-for-dev-and-testing';
+  }
   ['MONGODB_URI', 'JWT_SECRET'].forEach(requireEnv);
 };

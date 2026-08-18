@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import File from '../models/File.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +62,7 @@ const getDefaultStructure = () => ({
 /**
  * Load file structure from disk
  */
-const loadStructure = async (projectId) => {
+export const loadStructure = async (projectId) => {
   try {
     await ensureDir(STRUCTURE_FILE);
     const structurePath = getStructurePath(projectId);
@@ -82,7 +85,7 @@ const loadStructure = async (projectId) => {
 /**
  * Save file structure to disk
  */
-const saveStructure = async (projectId, structure) => {
+export const saveStructure = async (projectId, structure) => {
   try {
     await ensureDir(STRUCTURE_FILE);
     const structurePath = getStructurePath(projectId);
@@ -504,6 +507,59 @@ export const deleteFileOrFolder = async (req, res) => {
 };
 
 /**
+ * Sync file node with MongoDB File collection
+ */
+export const syncMongoFile = async (projectId, pathInput, name, content, userId) => {
+  try {
+    let pathString = '';
+    if (Array.isArray(pathInput)) {
+      const filtered = pathInput.filter(p => p !== 'root');
+      pathString = filtered.length > 0 ? filtered.join('/') : pathInput.join('/');
+    } else if (typeof pathInput === 'string') {
+      pathString = pathInput;
+    }
+    if (!pathString) return null;
+
+    let validProjectId = null;
+    if (mongoose.Types.ObjectId.isValid(projectId)) {
+      validProjectId = new mongoose.Types.ObjectId(projectId);
+    } else {
+      const hash = crypto.createHash('md5').update(String(projectId)).digest('hex').substring(0, 24);
+      validProjectId = new mongoose.Types.ObjectId(hash);
+    }
+
+    let validUserId = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      validUserId = new mongoose.Types.ObjectId(userId);
+    } else {
+      const hash = crypto.createHash('md5').update(userId ? String(userId) : 'system').digest('hex').substring(0, 24);
+      validUserId = new mongoose.Types.ObjectId(hash);
+    }
+
+    const fileName = name || pathString.split('/').pop() || 'untitled';
+
+    const mongoFile = await File.findOneAndUpdate(
+      { projectId: validProjectId, path: pathString },
+      {
+        name: fileName,
+        path: pathString,
+        projectId: validProjectId,
+        content: content || '',
+        createdBy: validUserId,
+        lastModifiedBy: validUserId,
+        isDeleted: false,
+        size: Buffer.byteLength(content || '', 'utf8')
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    return mongoFile;
+  } catch (err) {
+    console.error('Error syncing Mongo File:', err);
+    return null;
+  }
+};
+
+/**
  * GET /api/filesystem/:projectId/file
  * Get file content
  */
@@ -542,12 +598,17 @@ export const getFileContent = async (req, res) => {
       });
     }
 
+    // Sync canonical Mongo File document
+    const mongoFile = await syncMongoFile(projectId, pathArray, file.name, file.content || '', req.userId);
+
     res.json({
       success: true,
       data: {
         name: file.name,
         content: file.content || '',
-        id: file.id
+        id: file.id,
+        fileId: mongoFile ? mongoFile._id.toString() : file.id,
+        mongoFileId: mongoFile ? mongoFile._id.toString() : null
       }
     });
   } catch (error) {
@@ -602,6 +663,9 @@ export const updateFileContent = async (req, res) => {
     // Save structure
     await saveStructure(projectId, structure);
 
+    // Sync canonical Mongo File document
+    const mongoFile = await syncMongoFile(projectId, nodePath, file.name, file.content, req.userId);
+
     // Emit socket event
     const io = req.app.get('io');
     if (io) {
@@ -615,7 +679,11 @@ export const updateFileContent = async (req, res) => {
     res.json({
       success: true,
       message: 'File updated successfully',
-      data: file
+      data: {
+        ...file,
+        fileId: mongoFile ? mongoFile._id.toString() : file.id,
+        mongoFileId: mongoFile ? mongoFile._id.toString() : null
+      }
     });
   } catch (error) {
     console.error('Update file content error:', error);
@@ -633,5 +701,6 @@ export default {
   renameFileOrFolder,
   deleteFileOrFolder,
   getFileContent,
-  updateFileContent
+  updateFileContent,
+  syncMongoFile
 };

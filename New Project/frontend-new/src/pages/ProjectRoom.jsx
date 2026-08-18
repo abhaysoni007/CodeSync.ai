@@ -8,6 +8,7 @@ import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import ProjectTimeline from '../components/ProjectTimeline';
+import VersionHistoryPanel from '../components/VersionHistoryPanel';
 import FileExplorer from '../components/FileExplorer';
 import ActivityBar from '../components/ActivityBar';
 import ExtensionsPanel from '../components/ExtensionsPanel';
@@ -211,6 +212,19 @@ const ProjectRoom = () => {
     socketRef.current.on('users-online', (users) => {
       console.log('Online users:', users);
       setOnlineUsers(users);
+    });
+
+    socketRef.current.on('version:created', (data) => {
+      console.log('Realtime version event:', data);
+      toast.success(`Version v${data.versionNumber} ${data.action === 'restore' ? 'restored' : 'saved'}`);
+      if (data.action === 'restore' && data.content !== undefined) {
+        if (activeFile && (data.fileId === activeFile._id || data.fileId === activeFile.mongoFileId)) {
+          setCode(data.content);
+          if (editorRef.current) {
+            editorRef.current.setValue(data.content);
+          }
+        }
+      }
     });
 
     // File create/delete/rename are handled by the FileExplorer via the filesystem:* events
@@ -514,6 +528,11 @@ const ProjectRoom = () => {
       const res = await fileAPI.getFileContent(id, path);
       if (res?.success) {
         setCode(res.data?.content ?? '');
+        if (res.data?.mongoFileId || res.data?.fileId) {
+          next.mongoFileId = res.data.mongoFileId || res.data.fileId;
+          next._id = res.data.mongoFileId || res.data.fileId || next._id;
+          setActiveFile({ ...next });
+        }
       }
     } catch (error) {
       console.error('Failed to load file content:', error);
@@ -886,6 +905,22 @@ const ProjectRoom = () => {
             <ProjectTimeline projectId={id} socket={socketRef.current} />
           </div>
         </aside>
+      )}
+
+      {/* Version History Panel */}
+      {showVersionHistory && (
+        <VersionHistoryPanel
+          activeFile={activeFile}
+          projectId={id}
+          currentCode={code}
+          onClose={() => setShowVersionHistory(false)}
+          onVersionRestored={(restoredCode) => {
+            setCode(restoredCode);
+            if (editorRef.current) {
+              editorRef.current.setValue(restoredCode);
+            }
+          }}
+        />
       )}
 
       {/* Terminal Panel */}
