@@ -6,7 +6,9 @@ import {
   closeTerminal,
   getTerminalSessions 
 } from '../controllers/terminalController.js';
+import { listPorts } from '../controllers/portsController.js';
 import { authenticate } from '../middleware/auth.js';
+import { requireProjectMember } from '../middleware/projectAccess.js';
 
 const router = express.Router();
 
@@ -14,6 +16,9 @@ const router = express.Router();
  * Terminal Routes
  * All routes require authentication
  */
+
+// Which dev servers are currently listening (for the Ports panel).
+router.get('/:projectId/ports', authenticate, requireProjectMember, listPorts);
 
 // Get all active terminal sessions for a project
 router.get('/:projectId/sessions', authenticate, getTerminalSessions);

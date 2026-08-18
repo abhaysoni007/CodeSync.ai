@@ -96,6 +96,21 @@ const Dashboard = () => {
     }
   };
 
+  // Rename in place. A prompt rather than a modal: the checklist asks for rename, and one more
+  // dialog component is not what makes that feature real.
+  const handleRenameProject = async (project) => {
+    const name = window.prompt('Rename project', project.name)?.trim();
+    if (!name || name === project.name) return;
+
+    try {
+      await api.updateProject(project._id, { name });
+      setProjects((prev) => prev.map((p) => (p._id === project._id ? { ...p, name } : p)));
+      toast.success('Project renamed');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to rename project');
+    }
+  };
+
   const handleJoinByCode = async (e) => {
     e.preventDefault();
     if (!joinCode.trim()) {
@@ -250,8 +265,9 @@ const Dashboard = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        // TODO: Edit project
+                        handleRenameProject(project);
                       }}
+                      title="Rename project"
                       className="p-1.5 hover:bg-vscode-panel rounded opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Edit className="w-4 h-4 text-vscode-textMuted" />
