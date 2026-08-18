@@ -42,6 +42,28 @@
   overflow: hidden;
 }
 
+/* y-monaco Remote Cursor & Selection Styles */
+.yRemoteSelection {
+  background-color: rgba(232, 168, 85, 0.25);
+  border-radius: 2px;
+}
+
+.yRemoteSelectionHead {
+  position: absolute;
+  border-left: 2px solid #E8A855;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.yRemoteSelectionHead::after {
+  position: absolute;
+  content: ' ';
+  border: 3px solid #E8A855;
+  border-radius: 4px;
+  left: -4px;
+  top: -5px;
+}
+
 /* Remote Cursor Styles */
 .remote-cursor {
   border-left: 2px solid var(--cursor-color, #E8A855) !important;

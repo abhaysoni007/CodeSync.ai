@@ -59,7 +59,7 @@ const getDefaultStructure = () => ({
 /**
  * Load file structure from disk
  */
-const loadStructure = async (projectId) => {
+export const loadStructure = async (projectId) => {
   try {
     await ensureDir(STRUCTURE_FILE);
     const structurePath = getStructurePath(projectId);
@@ -82,7 +82,7 @@ const loadStructure = async (projectId) => {
 /**
  * Save file structure to disk
  */
-const saveStructure = async (projectId, structure) => {
+export const saveStructure = async (projectId, structure) => {
   try {
     await ensureDir(STRUCTURE_FILE);
     const structurePath = getStructurePath(projectId);
@@ -97,8 +97,8 @@ const saveStructure = async (projectId, structure) => {
 /**
  * Find node by path in tree
  */
-const findNodeByPath = (tree, pathArray) => {
-  if (pathArray.length === 0) return tree;
+export const findNodeByPath = (tree, pathArray) => {
+  if (!pathArray || pathArray.length === 0) return tree;
   
   // Skip 'root' in path since tree itself is root
   const actualPath = pathArray[0] === 'root' ? pathArray.slice(1) : pathArray;
@@ -108,7 +108,7 @@ const findNodeByPath = (tree, pathArray) => {
   let current = tree;
   for (let i = 0; i < actualPath.length; i++) {
     if (!current.children) return null;
-    current = current.children.find(child => child.id === actualPath[i]);
+    current = current.children.find(child => child.id === actualPath[i] || child.name === actualPath[i]);
     if (!current) return null;
   }
   return current;

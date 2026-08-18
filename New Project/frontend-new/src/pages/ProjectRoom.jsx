@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import { api } from '../utils/api';
@@ -7,6 +7,13 @@ import { makeActiveFile } from '../utils/fileIdentity';
 import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
+import * as Y from 'yjs';
+import { MonacoBinding } from 'y-monaco';
+import * as syncProtocol from 'y-protocols/sync';
+import * as awarenessProtocol from 'y-protocols/awareness';
+import * as encoding from 'lib0/encoding';
+import * as decoding from 'lib0/decoding';
+
 import ProjectTimeline from '../components/ProjectTimeline';
 import FileExplorer from '../components/FileExplorer';
 import ActivityBar from '../components/ActivityBar';
@@ -43,6 +50,30 @@ import {
   History,
 } from 'lucide-react';
 
+const isSamePath = (p1, p2) => {
+  if (!p1 || !p2) return false;
+  const str1 = Array.isArray(p1) ? p1.join('/') : String(p1);
+  const str2 = Array.isArray(p2) ? p2.join('/') : String(p2);
+  return str1 === str2;
+};
+
+// Generate consistent color for each user
+const generateUserColor = (userId) => {
+  const colors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+    '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2',
+    '#F8B739', '#52C41A', '#1890FF', '#722ED1',
+    '#EB2F96', '#FA8C16', '#13C2C2', '#2F54EB'
+  ];
+  
+  if (!userId) return colors[0];
+  const hash = String(userId).split('').reduce((acc, char) => {
+    return char.charCodeAt(0) + ((acc << 5) - acc);
+  }, 0);
+  
+  return colors[Math.abs(hash) % colors.length];
+};
+
 const ProjectRoom = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -69,13 +100,17 @@ const ProjectRoom = () => {
   
   // Terminal State
   const [showTerminal, setShowTerminal] = useState(false);
+  const [editorInstance, setEditorInstance] = useState(null);
   
   const socketRef = useRef(null);
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
-  const decorationsRef = useRef({});
-  const cursorTimeoutsRef = useRef({});
-  const isRemoteUpdateRef = useRef(false);
+
+  // Yjs CRDT References
+  const ydocRef = useRef(null);
+  const awarenessRef = useRef(null);
+  const bindingRef = useRef(null);
+  const currentBoundPathRef = useRef(null);
 
   // Socket.IO connection
   useEffect(() => {
@@ -101,123 +136,36 @@ const ProjectRoom = () => {
       toast.error('Disconnected from server');
     });
 
-    // Collaboration events
-    socketRef.current.on('code-update', (data) => {
-      console.log('Code update received:', data);
-      if (data.fileId === activeFile?._id && data.userId !== user?.id) {
-        // Set flag to prevent re-emitting this update
-        isRemoteUpdateRef.current = true;
-        setCode(data.code);
-        
-        // Update editor content if editor is mounted
-        if (editorRef.current && monacoRef.current) {
-          const model = editorRef.current.getModel();
-          if (model) {
-            const currentValue = model.getValue();
-            if (currentValue !== data.code) {
-              // Preserve cursor position during remote update
-              const position = editorRef.current.getPosition();
-              editorRef.current.setValue(data.code);
-              if (position) {
-                editorRef.current.setPosition(position);
-              }
-            }
-          }
-        }
-        
-        // Reset flag after a brief delay
-        setTimeout(() => {
-          isRemoteUpdateRef.current = false;
-        }, 100);
-      }
-    });
-
-    socketRef.current.on('cursor-update', (data) => {
-      console.log('Cursor update:', data);
-      if (data.userId !== user?.id && data.fileId === activeFile?._id) {
-        const userColor = data.color || generateUserColor(data.userId);
-        
-        setCursors(prev => ({
-          ...prev,
-          [data.userId]: {
-            position: data.position,
-            username: data.username,
-            color: userColor,
-            lastUpdate: Date.now(),
-          }
-        }));
-        
-        // Update cursor decorations in Monaco Editor
-        updateCursorDecorations(data.userId, data.position, data.username, userColor);
-        
-        // Clear existing timeout for this user
-        if (cursorTimeoutsRef.current[data.userId]) {
-          clearTimeout(cursorTimeoutsRef.current[data.userId]);
-        }
-        
-        // Set timeout to remove cursor after 10 seconds of inactivity
-        cursorTimeoutsRef.current[data.userId] = setTimeout(() => {
-          setCursors(prev => {
-            const updated = { ...prev };
-            delete updated[data.userId];
-            return updated;
-          });
-          
-          // Remove decorations
-          if (editorRef.current && decorationsRef.current[data.userId]) {
-            editorRef.current.deltaDecorations(decorationsRef.current[data.userId], []);
-            delete decorationsRef.current[data.userId];
-          }
-          
-          // Remove style
-          const styleElement = document.getElementById(`cursor-style-${data.userId}`);
-          if (styleElement) {
-            styleElement.remove();
-          }
-        }, 10000);
-      }
-    });
-
+    // Presence & Chat events
     socketRef.current.on('chat-message', (data) => {
-      console.log('Chat message received:', data);
       setMessages(prev => [...prev, data]);
-      
-      // Increment unread count if chat is not visible
-      if (!showChat && data.userId !== user?.id) {
+      if (!showChat) {
         setUnreadMessages(prev => prev + 1);
       }
-      
-      // Remove typing indicator for this user
       setTypingUsers(prev => prev.filter(u => u.userId !== data.userId));
     });
 
     socketRef.current.on('user-typing', ({ userId, username, isTyping }) => {
-      if (userId === user?.id) return; // Ignore own typing
+      if (userId === user?.id) return;
       
       setTypingUsers(prev => {
         if (isTyping) {
-          // Add user if not already in the list
           if (!prev.find(u => u.userId === userId)) {
             return [...prev, { userId, username }];
           }
           return prev;
         } else {
-          // Remove user from typing list
           return prev.filter(u => u.userId !== userId);
         }
       });
     });
 
     socketRef.current.on('users-online', (users) => {
-      console.log('Online users:', users);
       setOnlineUsers(users);
     });
 
-    // File create/delete/rename are handled by the FileExplorer via the filesystem:* events
-    // (see useFileExplorer). ProjectRoom only reacts by clearing the editor if the open file
-    // is deleted out from under it.
     socketRef.current.on('filesystem:deleted', ({ path }) => {
-      if (activeFile?.path && path?.join('/') === activeFile.path.join('/')) {
+      if (activeFile?.path && isSamePath(path, activeFile.path)) {
         setActiveFile(null);
         setCode('');
       }
@@ -232,13 +180,12 @@ const ProjectRoom = () => {
     });
 
     return () => {
-      // Cleanup
       if (socketRef.current) {
         socketRef.current.emit('leave-project', { projectId: id });
         socketRef.current.disconnect();
       }
     };
-  }, [id, user, activeFile]);
+  }, [id, user]);
 
   // Load project data
   useEffect(() => {
@@ -265,179 +212,190 @@ const ProjectRoom = () => {
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
-      // Don't show error toast, messages are not critical for initial load
     }
   };
 
-  const handleEditorChange = (value) => {
-    // Skip if this is a remote update to prevent echo
-    if (isRemoteUpdateRef.current) {
+  /**
+   * Yjs CRDT Collaboration Binding with Monaco Editor
+   */
+  useEffect(() => {
+    const editor = editorRef.current;
+    const socket = socketRef.current;
+
+    if (!editor || !socket || !activeFile?.path) {
       return;
     }
-    
-    setCode(value);
 
-    // Emit code update to other users via Socket.IO
-    if (socketRef.current && activeFile) {
-      socketRef.current.emit('code-update', {
+    const pathStr = Array.isArray(activeFile.path) ? activeFile.path.join('/') : String(activeFile.path);
+
+    // Clean up any existing Yjs binding
+    if (bindingRef.current) {
+      bindingRef.current.destroy();
+      bindingRef.current = null;
+    }
+    if (awarenessRef.current) {
+      awarenessRef.current.destroy();
+      awarenessRef.current = null;
+    }
+    if (ydocRef.current) {
+      ydocRef.current.destroy();
+      ydocRef.current = null;
+    }
+
+    if (currentBoundPathRef.current && currentBoundPathRef.current !== pathStr) {
+      socket.emit('yjs:leave-file', {
         projectId: id,
-        roomId: id, // For backward compatibility with Claude backend
-        fileId: activeFile._id,
-        code: value,
-        userId: user?.id,
+        filePath: currentBoundPathRef.current
       });
     }
-  };
 
-  const handleCursorChange = (position) => {
-    if (socketRef.current && activeFile) {
-      const userColor = generateUserColor(user?.id || 'default');
-      
-      socketRef.current.emit('cursor-update', {
-        projectId: id,
-        roomId: id, // For backward compatibility
-        fileId: activeFile._id,
-        position,
-        userId: user?.id,
-        username: user?.username,
-        color: userColor,
-      });
-    }
-  };
+    currentBoundPathRef.current = pathStr;
 
-  // Generate consistent color for each user
-  const generateUserColor = (userId) => {
-    const colors = [
-      '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
-      '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2',
-      '#F8B739', '#52C41A', '#1890FF', '#722ED1',
-      '#EB2F96', '#FA8C16', '#13C2C2', '#2F54EB'
-    ];
-    
-    if (!userId) return colors[0];
-    
-    const hash = userId.split('').reduce((acc, char) => {
-      return char.charCodeAt(0) + ((acc << 5) - acc);
-    }, 0);
-    
-    return colors[Math.abs(hash) % colors.length];
-  };
+    // 1. Create new Y.Doc and Awareness
+    const ydoc = new Y.Doc();
+    ydocRef.current = ydoc;
+    const ytext = ydoc.getText('monaco');
+    const awareness = new awarenessProtocol.Awareness(ydoc);
+    awarenessRef.current = awareness;
 
-  // Update cursor decorations in Monaco Editor
-  const updateCursorDecorations = (userId, position, username, color) => {
-    if (!editorRef.current || !monacoRef.current || !position) return;
+    // 2. Set local user state in Awareness
+    const userColor = generateUserColor(user?.id || 'default');
+    awareness.setLocalStateField('user', {
+      name: user?.username || 'Anonymous',
+      color: userColor,
+      colorLight: `${userColor}33`,
+    });
 
-    const { lineNumber, column } = position;
-    
-    // Remove old decorations for this user
-    if (decorationsRef.current[userId]) {
-      decorationsRef.current[userId] = editorRef.current.deltaDecorations(
-        decorationsRef.current[userId],
-        []
+    // 3. Bind Yjs Text to Monaco Model
+    const model = editor.getModel();
+    if (model) {
+      bindingRef.current = new MonacoBinding(
+        ytext,
+        model,
+        new Set([editor]),
+        awareness
       );
     }
 
-    // Create new decorations
-    const decorations = [
-      {
-        range: new monacoRef.current.Range(lineNumber, column, lineNumber, column + 1),
-        options: {
-          className: 'remote-cursor',
-          beforeContentClassName: 'remote-cursor-line',
-          afterContentClassName: 'remote-cursor-label',
-          after: {
-            content: username,
-            inlineClassName: 'remote-cursor-name',
-          },
-          stickiness: monacoRef.current.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-          zIndex: 100,
-          isWholeLine: false,
-        }
-      },
-      // Cursor line highlight
-      {
-        range: new monacoRef.current.Range(lineNumber, 1, lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'remote-cursor-line-highlight',
-          linesDecorationsClassName: 'remote-cursor-line-decoration',
-        }
-      }
-    ];
+    // 4. Update local state when document text changes
+    const handleYdocChange = () => {
+      setCode(ytext.toString());
+    };
+    ytext.observe(handleYdocChange);
 
-    // Apply decorations
-    decorationsRef.current[userId] = editorRef.current.deltaDecorations([], decorations);
-
-    // Inject custom CSS for this user's cursor color
-    injectCursorStyle(userId, color, username);
-  };
-
-  // Inject custom CSS for cursor styling
-  const injectCursorStyle = (userId, color, username) => {
-    const styleId = `cursor-style-${userId}`;
-    let styleElement = document.getElementById(styleId);
-    
-    if (!styleElement) {
-      styleElement = document.createElement('style');
-      styleElement.id = styleId;
-      document.head.appendChild(styleElement);
-    }
-
-    styleElement.textContent = `
-      .remote-cursor-${userId} {
-        border-left: 2px solid ${color} !important;
-        position: relative;
-      }
-      .remote-cursor-${userId}::before {
-        content: "${username}";
-        position: absolute;
-        top: -20px;
-        left: -2px;
-        background-color: ${color};
-        color: white;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 11px;
-        font-weight: 500;
-        white-space: nowrap;
-        z-index: 1000;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-      }
-    `;
-  };
-
-  // Clear cursor decorations when users leave
-  useEffect(() => {
-    const currentOnlineUserIds = new Set(onlineUsers.map(u => u.id));
-    
-    // Remove decorations for users who are no longer online
-    Object.keys(decorationsRef.current).forEach(userId => {
-      if (!currentOnlineUserIds.has(userId) && userId !== user?.id) {
-        if (editorRef.current && decorationsRef.current[userId]) {
-          editorRef.current.deltaDecorations(decorationsRef.current[userId], []);
-          delete decorationsRef.current[userId];
-        }
+    // 5. Send local document updates to socket
+    const handleLocalUpdate = (update, origin) => {
+      if (origin !== 'remote-socket' && socket.connected) {
+        const encoder = encoding.createEncoder();
+        syncProtocol.writeUpdate(encoder, update);
         
-        // Remove style element
-        const styleElement = document.getElementById(`cursor-style-${userId}`);
-        if (styleElement) {
-          styleElement.remove();
-        }
+        socket.emit('yjs:sync', {
+          projectId: id,
+          filePath: activeFile.path,
+          update: encoding.toUint8Array(encoder)
+        });
       }
+    };
+    ydoc.on('update', handleLocalUpdate);
+
+    // 6. Send local awareness updates (cursors/selections) to socket
+    const handleLocalAwareness = ({ added, updated, removed }, origin) => {
+      if (origin !== 'remote-socket' && socket.connected) {
+        const changedClients = added.concat(updated).concat(removed);
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint8Array(
+          encoder,
+          awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients)
+        );
+        
+        socket.emit('yjs:awareness', {
+          projectId: id,
+          filePath: activeFile.path,
+          update: encoding.toUint8Array(encoder)
+        });
+      }
+    };
+    awareness.on('update', handleLocalAwareness);
+
+    // 7. Receive remote Yjs sync updates
+    const handleRemoteSync = ({ filePath, update }) => {
+      if (!isSamePath(filePath, activeFile.path) || !ydocRef.current) return;
+      
+      try {
+        const uint8 = update instanceof Uint8Array ? update : new Uint8Array(update);
+        const decoder = decoding.createDecoder(uint8);
+        const encoder = encoding.createEncoder();
+        
+        syncProtocol.readSyncMessage(decoder, encoder, ydocRef.current, 'remote-socket');
+
+        if (encoding.length(encoder) > 0 && socket.connected) {
+          socket.emit('yjs:sync', {
+            projectId: id,
+            filePath: activeFile.path,
+            update: encoding.toUint8Array(encoder)
+          });
+        }
+      } catch (err) {
+        console.error('[Yjs] Error applying remote sync:', err);
+      }
+    };
+
+    // 8. Receive remote awareness updates (peer cursors)
+    const handleRemoteAwareness = ({ filePath, update }) => {
+      if (!isSamePath(filePath, activeFile.path) || !awarenessRef.current) return;
+      
+      try {
+        const uint8 = update instanceof Uint8Array ? update : new Uint8Array(update);
+        awarenessProtocol.applyAwarenessUpdate(awarenessRef.current, uint8, 'remote-socket');
+      } catch (err) {
+        console.error('[Yjs] Error applying remote awareness:', err);
+      }
+    };
+
+    socket.on('yjs:sync', handleRemoteSync);
+    socket.on('yjs:awareness', handleRemoteAwareness);
+
+    // 9. Join the file room on the backend
+    socket.emit('yjs:join-file', {
+      projectId: id,
+      filePath: activeFile.path,
+      initialContent: activeFile.content || ''
     });
-  }, [onlineUsers, user]);
+
+    return () => {
+      socket.off('yjs:sync', handleRemoteSync);
+      socket.off('yjs:awareness', handleRemoteAwareness);
+      ytext.unobserve(handleYdocChange);
+      ydoc.off('update', handleLocalUpdate);
+      awareness.off('update', handleLocalAwareness);
+
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+      if (awarenessRef.current) {
+        awarenessRef.current.destroy();
+        awarenessRef.current = null;
+      }
+      if (ydocRef.current) {
+        ydocRef.current.destroy();
+        ydocRef.current = null;
+      }
+    };
+  }, [id, activeFile, user, editorInstance]);
 
   const handleSaveFile = async () => {
     if (!activeFile?.path) return;
 
     try {
-      // Persist through the single filesystem backend, then tell peers to refresh this file.
-      await fileAPI.updateFileContent(id, { path: activeFile.path, content: code });
+      const currentContent = editorRef.current?.getValue() || code;
+      await fileAPI.updateFileContent(id, { path: activeFile.path, content: currentContent });
+      
       if (socketRef.current) {
         socketRef.current.emit('filesystem:file-updated', {
           projectId: id,
           path: activeFile.path,
-          content: code,
+          content: currentContent,
         });
       }
       toast.success('File saved');
@@ -449,16 +407,12 @@ const ProjectRoom = () => {
 
   const handleTyping = () => {
     if (!socketRef.current || !id) return;
-    
-    // Emit typing started
     socketRef.current.emit('typing', { projectId: id, isTyping: true });
     
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    // Set timeout to stop typing after 2 seconds of inactivity
     typingTimeoutRef.current = setTimeout(() => {
       handleStopTyping();
     }, 2000);
@@ -466,11 +420,8 @@ const ProjectRoom = () => {
 
   const handleStopTyping = () => {
     if (!socketRef.current || !id) return;
-    
-    // Emit typing stopped
     socketRef.current.emit('typing', { projectId: id, isTyping: false });
     
-    // Clear timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
@@ -481,13 +432,10 @@ const ProjectRoom = () => {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
-    // Stop typing indicator
     handleStopTyping();
 
     const messageData = {
       projectId: id,
-      userId: user?.id,
-      username: user?.username,
       message: newMessage.trim(),
     };
 
@@ -501,8 +449,6 @@ const ProjectRoom = () => {
     }
   };
 
-  // Open a file selected in the FileExplorer tree. Identity is the tree path (see fileIdentity.js);
-  // content is fetched fresh from the single filesystem backend so we never show a stale tree copy.
   const openFile = async (node, path) => {
     if (node.type !== 'file') return;
 
@@ -520,20 +466,8 @@ const ProjectRoom = () => {
     }
   };
 
-  const toggleFolder = (folderId) => {
-    setExpandedFolders(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(folderId)) {
-        newSet.delete(folderId);
-      } else {
-        newSet.add(folderId);
-      }
-      return newSet;
-    });
-  };
-
   const getFileLanguage = (fileName) => {
-    const ext = fileName.split('.').pop()?.toLowerCase();
+    const ext = fileName?.split('.').pop()?.toLowerCase();
     const languageMap = {
       js: 'javascript',
       jsx: 'javascript',
@@ -548,65 +482,51 @@ const ProjectRoom = () => {
       css: 'css',
       json: 'json',
       md: 'markdown',
+      markdown: 'markdown',
+      yaml: 'yaml',
+      yml: 'yaml',
       xml: 'xml',
       sql: 'sql',
       sh: 'shell',
-      yaml: 'yaml',
-      yml: 'yaml',
+      bash: 'shell',
     };
     return languageMap[ext] || 'plaintext';
   };
 
   return (
-    <div className="h-screen flex flex-col bg-vscode-bg text-vscode-text">
+    <div className="flex flex-col h-screen bg-vscode-bg text-vscode-text">
       {/* Top Header */}
-      <header className="h-12 bg-vscode-panel border-b border-vscode-border flex items-center justify-between px-4">
-        <div className="flex items-center gap-4">
+      <div className="h-12 bg-vscode-panel border-b border-vscode-border flex items-center justify-between px-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/dashboard')}
-            className="p-1.5 hover:bg-vscode-bg rounded transition-colors"
+            className="p-1.5 hover:bg-vscode-bg rounded transition-colors text-vscode-textMuted hover:text-vscode-text"
+            title="Back to Dashboard"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-2">
-            <FolderOpen className="w-5 h-5 text-vscode-accent" />
-            <h1 className="font-semibold text-white">{project?.name || 'Loading...'}</h1>
+            <Folder className="w-4 h-4 text-vscode-accent" />
+            <h1 className="font-semibold text-sm">{project?.name || 'Project'}</h1>
+            <span className="text-xs text-vscode-textMuted px-2 py-0.5 rounded bg-vscode-bg">
+              {project?.joinCode}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Online Users */}
-          <div className="flex items-center gap-2 px-3 py-1 bg-vscode-bg rounded">
-            <Users className="w-4 h-4 text-vscode-accent" />
-            <span className="text-sm text-vscode-textMuted">{onlineUsers.length} online</span>
-          </div>
-
+        <div className="flex items-center gap-2">
           {/* Activity Timeline Toggle */}
           <button
             onClick={() => setShowActivityPanel(!showActivityPanel)}
-            className={`px-3 py-1.5 text-sm rounded transition-colors ${
+            className={`px-3 py-1.5 text-sm rounded transition-colors flex items-center gap-1.5 ${
               showActivityPanel 
                 ? 'bg-vscode-accent text-white' 
                 : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
             }`}
-            title="Toggle Activity Timeline"
+            title="Activity Timeline"
           >
-            <Clock className="w-4 h-4 mr-1.5 inline" />
-            Activity
-          </button>
-
-          {/* Version History Toggle */}
-          <button
-            onClick={() => setShowVersionHistory(!showVersionHistory)}
-            className={`px-3 py-1.5 text-sm rounded transition-colors ${
-              showVersionHistory 
-                ? 'bg-vscode-accent text-white' 
-                : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
-            }`}
-            title="Toggle Version History"
-          >
-            <History className="w-4 h-4 mr-1.5 inline" />
-            History
+            <Clock className="w-4 h-4" />
+            <span>Activity</span>
           </button>
 
           {/* Terminal Toggle */}
@@ -617,96 +537,98 @@ const ProjectRoom = () => {
                 ? 'bg-vscode-accent text-white' 
                 : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
             }`}
-            title="Toggle Terminal"
           >
-            <svg 
-              className="w-4 h-4 mr-1.5 inline" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-            >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" 
-              />
-            </svg>
             Terminal
           </button>
 
-          {/* Save Button */}
+          {/* Chat Toggle */}
           <button
-            onClick={handleSaveFile}
-            disabled={!activeFile}
-            className="btn-primary px-3 py-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => {
+              setShowChat(!showChat);
+              if (!showChat) setUnreadMessages(0);
+            }}
+            className={`relative px-3 py-1.5 text-sm rounded transition-colors ${
+              showChat 
+                ? 'bg-vscode-accent text-white' 
+                : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
+            }`}
           >
-            <Save className="w-4 h-4 mr-1.5" />
-            Save
+            <MessageSquare className="w-4 h-4 inline mr-1" />
+            Chat
+            {unreadMessages > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                {unreadMessages}
+              </span>
+            )}
           </button>
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Activity Bar - switches the sidebar between Explorer and Extensions */}
-        <ActivityBar active={sidebarView} onChange={setSidebarView} />
-
-        {/* Left Sidebar */}
-        <aside className="w-64 bg-vscode-panel border-r border-vscode-border flex flex-col">
-          {sidebarView === 'explorer' ? (
-            <FileExplorer
-              projectId={id}
-              socket={socketRef.current}
-              onFileSelect={openFile}
-            />
-          ) : (
-            <ExtensionsPanel />
+          {/* Save Button */}
+          {activeFile && (
+            <button
+              onClick={handleSaveFile}
+              className="px-3 py-1.5 text-sm bg-vscode-accent text-white rounded hover:bg-opacity-90 transition-colors flex items-center gap-1"
+            >
+              <Save className="w-4 h-4" />
+              Save
+            </button>
           )}
-        </aside>
 
-        {/* Center - Monaco Editor */}
-        <main className="flex-1 flex flex-col">
+          {/* User Profile */}
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-vscode-border">
+            <div className="w-7 h-7 rounded-full bg-vscode-accent text-white flex items-center justify-center font-medium text-xs">
+              {user?.username?.[0]?.toUpperCase()}
+            </div>
+            <span className="text-xs text-vscode-text font-medium">{user?.username}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Workspace */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Activity Bar (VS Code left strip) */}
+        <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} />
+
+        {/* Primary Sidebar (Explorer / Extensions) */}
+        {sidebarView && (
+          <div className="w-64 bg-vscode-panel border-r border-vscode-border flex flex-col">
+            {sidebarView === 'explorer' && (
+              <FileExplorer
+                projectId={id}
+                socket={socketRef.current}
+                activeFile={activeFile}
+                onFileSelect={openFile}
+              />
+            )}
+            {sidebarView === 'extensions' && <ExtensionsPanel />}
+          </div>
+        )}
+
+        {/* Editor Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
           {activeFile ? (
             <>
-              <div className="h-10 bg-vscode-panel border-b border-vscode-border flex items-center justify-between px-4">
+              {/* Tab Bar */}
+              <div className="h-9 bg-vscode-panel border-b border-vscode-border flex items-center justify-between px-3">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-vscode-accent" />
+                  <FileCode className="w-4 h-4 text-vscode-accent" />
                   <span className="text-sm">{activeFile.name}</span>
+                  <span className="text-xs text-vscode-textMuted">
+                    ({Array.isArray(activeFile.path) ? activeFile.path.join('/') : activeFile.path})
+                  </span>
                 </div>
-                
-                {/* Active users in this file */}
-                {Object.keys(cursors).length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="flex -space-x-2">
-                      {Object.entries(cursors).slice(0, 3).map(([userId, cursor]) => (
-                        <div
-                          key={userId}
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold text-white border-2 border-vscode-panel"
-                          style={{ backgroundColor: cursor.color }}
-                          title={cursor.username}
-                        >
-                          {cursor.username?.[0]?.toUpperCase()}
-                        </div>
-                      ))}
-                    </div>
-                    {Object.keys(cursors).length > 3 && (
-                      <span className="text-xs text-vscode-textMuted">
-                        +{Object.keys(cursors).length - 3}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" title="CRDT Live Sync Active" />
+                  <span className="text-xs text-vscode-textMuted font-mono">Yjs CRDT</span>
+                </div>
               </div>
+
+              {/* Monaco Editor */}
               <div className="flex-1">
                 <Editor
                   height="100%"
                   language={getFileLanguage(activeFile.name)}
-                  value={code}
-                  onChange={handleEditorChange}
+                  defaultValue={activeFile.content || ''}
                   beforeMount={(monaco) => {
-                    // Custom theme matching the app palette — vs-dark's default blue selection/
-                    // cursor would clash with the amber accent used everywhere else.
                     monaco.editor.defineTheme('codesync-dark', {
                       base: 'vs-dark',
                       inherit: true,
@@ -739,37 +661,12 @@ const ProjectRoom = () => {
                   onMount={(editor, monaco) => {
                     editorRef.current = editor;
                     monacoRef.current = monaco;
-                    
-                    console.log('Monaco Editor mounted');
-                    
-                    // Track cursor position changes
-                    editor.onDidChangeCursorPosition((e) => {
-                      handleCursorChange({
-                        lineNumber: e.position.lineNumber,
-                        column: e.position.column,
-                      });
-                    });
+                    setEditorInstance(editor);
 
-                    // Track selection changes
-                    editor.onDidChangeCursorSelection((e) => {
-                      const selection = e.selection;
-                      if (!selection.isEmpty()) {
-                        // User has selected text
-                        handleCursorChange({
-                          lineNumber: selection.startLineNumber,
-                          column: selection.startColumn,
-                          endLineNumber: selection.endLineNumber,
-                          endColumn: selection.endColumn,
-                        });
-                      }
-                    });
-
-                    // Add keyboard shortcut for save (Ctrl+S / Cmd+S)
                     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                       handleSaveFile();
                     });
 
-                    // Focus editor on mount
                     editor.focus();
                   }}
                   theme="codesync-dark"
@@ -798,105 +695,72 @@ const ProjectRoom = () => {
                     matchBrackets: 'always',
                     autoClosingBrackets: 'always',
                     autoClosingQuotes: 'always',
-                    renderWhitespace: 'selection',
-                    renderLineHighlight: 'all',
                   }}
                 />
               </div>
-              
-              {/* Editor Status Bar */}
-              <div className="h-6 bg-vscode-panel border-t border-vscode-border flex items-center justify-between px-4 text-xs text-vscode-textMuted">
-                <div className="flex items-center gap-4">
-                  <span>Line {editorRef.current?.getPosition()?.lineNumber || 1}, Col {editorRef.current?.getPosition()?.column || 1}</span>
-                  <span className="capitalize">{getFileLanguage(activeFile.name)}</span>
-                  {socketRef.current?.connected && (
-                    <span className="flex items-center gap-1 text-green-400">
-                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                      Connected
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {Object.keys(cursors).length > 0 && (
-                    <span className="text-vscode-accent">
-                      {Object.keys(cursors).length} {Object.keys(cursors).length === 1 ? 'user' : 'users'} editing
-                    </span>
-                  )}
-                </div>
-              </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center bg-vscode-bg">
-              <div className="text-center">
-                <FileCode className="w-16 h-16 mx-auto mb-4 text-vscode-textMuted opacity-50" />
-                <h3 className="text-lg font-semibold text-white mb-2">No file selected</h3>
-                <p className="text-vscode-textMuted text-sm">
-                  Select a file from the explorer or create a new one
-                </p>
-              </div>
+            <div className="flex-1 flex flex-col items-center justify-center text-vscode-textMuted bg-[#0D0F12]">
+              <FileCode className="w-16 h-16 mb-4 text-vscode-border" />
+              <p className="text-lg font-medium text-vscode-text">No file open</p>
+              <p className="text-sm mt-1">Select a file from the explorer to begin collaborative editing</p>
             </div>
           )}
-        </main>
 
-        {/* Right Sidebar - Chat & Video */}
-        <VideoChatPanel
-          socket={socketRef.current}
-          projectId={id}
-          user={user}
-          onlineUsers={onlineUsers}
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          newMessage={newMessage}
-          onMessageChange={(e) => {
-            setNewMessage(e.target.value);
-            handleTyping();
-          }}
-          typingUsers={typingUsers}
-          showChat={showChat}
-          onToggleChat={(isChat) => {
-            setShowChat(isChat);
-            if (isChat) {
-              setUnreadMessages(0);
-            }
-          }}
-          unreadMessages={unreadMessages}
-        />
+          {/* Terminal Panel */}
+          {showTerminal && (
+            <div className="h-64 border-t border-vscode-border">
+              <TerminalPanel projectId={id} />
+            </div>
+          )}
+        </div>
 
+        {/* Right Panel: Project Chat & WebRTC Calling */}
+        {showChat && (
+          <div className="w-80 border-l border-vscode-border flex flex-col bg-vscode-panel">
+            <VideoChatPanel
+              projectId={id}
+              socket={socketRef.current}
+              user={user}
+              currentUser={user}
+              messages={messages}
+              newMessage={newMessage}
+              onMessageChange={(e) => {
+                setNewMessage(e.target.value);
+                handleTyping();
+              }}
+              onSendMessage={handleSendMessage}
+              typingUsers={typingUsers}
+              showChat={showChat}
+              onToggleChat={setShowChat}
+              unreadMessages={unreadMessages}
+            />
+          </div>
+        )}
+
+        {/* Activity Timeline Slide-out Panel */}
+        {showActivityPanel && (
+          <div className="w-96 border-l border-vscode-border flex flex-col bg-vscode-panel z-40">
+            <div className="p-3 border-b border-vscode-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-vscode-accent" />
+                <h3 className="text-sm font-semibold">Project Activity Timeline</h3>
+              </div>
+              <button
+                onClick={() => setShowActivityPanel(false)}
+                className="p-1 hover:bg-vscode-bg rounded text-vscode-textMuted hover:text-vscode-text"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <ProjectTimeline projectId={id} socket={socketRef.current} />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Activity Timeline Panel */}
-      {showActivityPanel && (
-        <aside className="w-96 bg-vscode-panel border-l border-vscode-border flex flex-col">
-          {/* Activity Panel Header */}
-          <div className="p-4 border-b border-vscode-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-vscode-accent" />
-              <h2 className="font-semibold text-white">Activity Timeline</h2>
-            </div>
-            <button
-              onClick={() => setShowActivityPanel(false)}
-              className="p-1 hover:bg-vscode-bg rounded transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Timeline Content */}
-          <div className="flex-1 overflow-y-auto">
-            <ProjectTimeline projectId={id} socket={socketRef.current} />
-          </div>
-        </aside>
-      )}
-
-      {/* Terminal Panel */}
-      <TerminalPanel
-        socket={socketRef.current}
-        projectId={id}
-        isVisible={showTerminal}
-        onToggle={() => setShowTerminal(!showTerminal)}
-      />
-
-      {/* AI Assistant - Only visible in Project Room */}
+      {/* Floating AI Assistant Button & Panel */}
       <AIToggleButton />
       <AIInterface />
     </div>
