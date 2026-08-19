@@ -4,6 +4,7 @@ import { useUser } from '../context/UserContext';
 import { api } from '../utils/api';
 import * as fileAPI from '../services/fileAPI';
 import { makeActiveFile } from '../utils/fileIdentity';
+import { isPreviewable } from '../utils/runners';
 import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
@@ -15,11 +16,16 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
 import ProjectTimeline from '../components/ProjectTimeline';
+import VersionHistoryPanel from '../components/VersionHistoryPanel';
 import FileExplorer from '../components/FileExplorer';
 import ActivityBar from '../components/ActivityBar';
 import ExtensionsPanel from '../components/ExtensionsPanel';
+import SearchPanel from '../components/SearchPanel';
+import PortsPanel from '../components/PortsPanel';
+import CommandPalette from '../components/CommandPalette';
 import VideoChatPanel from '../components/VideoChatPanel';
 import TerminalPanel from '../components/TerminalPanel';
+import { useTerminalStore } from '../stores/terminalStore';
 import AIToggleButton from '../components/AIInterface/AIToggleButton';
 import AIInterface from '../components/AIInterface';
 import '../components/FileExplorer.css';
@@ -48,6 +54,7 @@ import {
   ChevronLeft,
   Clock,
   History,
+  Globe,
 } from 'lucide-react';
 
 const isSamePath = (p1, p2) => {
@@ -80,12 +87,23 @@ const ProjectRoom = () => {
   const { user } = useUser();
   const [project, setProject] = useState(null);
   const [sidebarView, setSidebarView] = useState('explorer');
-  const [activeFile, setActiveFile] = useState(null);
-  const [code, setCode] = useState('');
+
+  /**
+   * Open editor tabs.
+   * Tab shape: { key, name, path, content, saved, loading }.
+   */
+  const [tabs, setTabs] = useState([]);
+  const [activeKey, setActiveKey] = useState(null);
+  const closedStack = useRef([]);
+  const [autosave, setAutosave] = useState(
+    () => localStorage.getItem('codesync:autosave') === 'true'
+  );
+  const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const [palette, setPalette] = useState(null);
+  const [fileTree, setFileTree] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [cursors, setCursors] = useState({});
   const [showChat, setShowChat] = useState(true);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [expandedFolders, setExpandedFolders] = useState(new Set(['root']));
@@ -102,7 +120,31 @@ const ProjectRoom = () => {
   const [showTerminal, setShowTerminal] = useState(false);
   const [editorInstance, setEditorInstance] = useState(null);
   
+  const [socket, setSocket] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
   const socketRef = useRef(null);
+  const announcedConnect = useRef(false);
+
+  const activeTab = tabs.find((t) => t.key === activeKey) || null;
+  const activeFile = activeTab
+    ? { _id: activeTab.key, name: activeTab.name, path: activeTab.path, content: activeTab.content }
+    : null;
+  const code = activeTab?.content ?? '';
+  const isDirty = (tab) => tab && tab.content !== tab.saved;
+  const dirtyTabs = tabs.filter(isDirty);
+
+  const patchTab = (key, patch) =>
+    setTabs((prev) => prev.map((t) => (t.key === key ? { ...t, ...patch } : t)));
+
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+
+  const activeFileRef = useRef(null);
+  const showChatRef = useRef(true);
+  useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
+  useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
 
@@ -117,15 +159,23 @@ const ProjectRoom = () => {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
     const token = localStorage.getItem('token');
 
-    socketRef.current = io(API_URL, {
+    if (!user?.id) return undefined;
+
+    const socketInstance = io(API_URL, {
       auth: { token },
       query: { projectId: id },
     });
+    socketRef.current = socketInstance;
+    setSocket(socketInstance);
 
     // Connection events
     socketRef.current.on('connect', () => {
-      console.log('Socket connected:', socketRef.current.id);
-      toast.success('Connected to collaboration server');
+      console.log('Socket connected:', socketInstance.id);
+      setIsConnected(true);
+      if (!announcedConnect.current) {
+        announcedConnect.current = true;
+        toast.success('Connected to collaboration server');
+      }
       
       // Join project room
       socketRef.current.emit('join-project', { projectId: id, userId: user?.id });
@@ -133,13 +183,16 @@ const ProjectRoom = () => {
 
     socketRef.current.on('disconnect', () => {
       console.log('Socket disconnected');
-      toast.error('Disconnected from server');
+      setIsConnected(false);
     });
 
-    // Presence & Chat events
+    socketInstance.io.on('reconnect_failed', () => {
+      toast.error('Lost connection to the collaboration server');
+    });
+
     socketRef.current.on('chat-message', (data) => {
       setMessages(prev => [...prev, data]);
-      if (!showChat) {
+      if (!showChatRef.current && data.userId !== user?.id) {
         setUnreadMessages(prev => prev + 1);
       }
       setTypingUsers(prev => prev.filter(u => u.userId !== data.userId));
@@ -164,30 +217,29 @@ const ProjectRoom = () => {
       setOnlineUsers(users);
     });
 
-    socketRef.current.on('filesystem:deleted', ({ path }) => {
-      if (activeFile?.path && isSamePath(path, activeFile.path)) {
-        setActiveFile(null);
-        setCode('');
+    socketRef.current.on('filesystem:deleted', ({ path: deletedPath }) => {
+      if (activeFile?.path && isSamePath(deletedPath, activeFile.path)) {
+        closeTab(activeKey);
       }
     });
 
-    socketRef.current.on('user-joined', (userData) => {
-      toast.success(`${userData.username} joined the project`);
-    });
-
-    socketRef.current.on('user-left', (userData) => {
-      toast(`${userData.username} left the project`);
+    socketRef.current.on('version:created', (data) => {
+      console.log('Realtime version event:', data);
+      toast.success(`Version v${data.versionNumber} ${data.action === 'restore' ? 'restored' : 'saved'}`);
+      if (data.action === 'restore' && data.content !== undefined) {
+        if (activeKey) {
+          patchTab(activeKey, { content: data.content, saved: data.content });
+        }
+      }
     });
 
     return () => {
       if (socketRef.current) {
-        socketRef.current.emit('leave-project', { projectId: id });
         socketRef.current.disconnect();
       }
     };
   }, [id, user]);
 
-  // Load project data
   useEffect(() => {
     loadProject();
     loadMessages();
@@ -220,9 +272,9 @@ const ProjectRoom = () => {
    */
   useEffect(() => {
     const editor = editorRef.current;
-    const socket = socketRef.current;
+    const socketInstance = socketRef.current;
 
-    if (!editor || !socket || !activeFile?.path) {
+    if (!editor || !socketInstance || !activeFile?.path) {
       return;
     }
 
@@ -243,7 +295,7 @@ const ProjectRoom = () => {
     }
 
     if (currentBoundPathRef.current && currentBoundPathRef.current !== pathStr) {
-      socket.emit('yjs:leave-file', {
+      socketInstance.emit('yjs:leave-file', {
         projectId: id,
         filePath: currentBoundPathRef.current
       });
@@ -277,19 +329,22 @@ const ProjectRoom = () => {
       );
     }
 
-    // 4. Update local state when document text changes
+    // 4. Update tab content when document text changes
     const handleYdocChange = () => {
-      setCode(ytext.toString());
+      const currentText = ytext.toString();
+      if (activeKey) {
+        patchTab(activeKey, { content: currentText });
+      }
     };
     ytext.observe(handleYdocChange);
 
     // 5. Send local document updates to socket
     const handleLocalUpdate = (update, origin) => {
-      if (origin !== 'remote-socket' && socket.connected) {
+      if (origin !== 'remote-socket' && socketInstance.connected) {
         const encoder = encoding.createEncoder();
         syncProtocol.writeUpdate(encoder, update);
         
-        socket.emit('yjs:sync', {
+        socketInstance.emit('yjs:sync', {
           projectId: id,
           filePath: activeFile.path,
           update: encoding.toUint8Array(encoder)
@@ -300,7 +355,7 @@ const ProjectRoom = () => {
 
     // 6. Send local awareness updates (cursors/selections) to socket
     const handleLocalAwareness = ({ added, updated, removed }, origin) => {
-      if (origin !== 'remote-socket' && socket.connected) {
+      if (origin !== 'remote-socket' && socketInstance.connected) {
         const changedClients = added.concat(updated).concat(removed);
         const encoder = encoding.createEncoder();
         encoding.writeVarUint8Array(
@@ -308,7 +363,7 @@ const ProjectRoom = () => {
           awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients)
         );
         
-        socket.emit('yjs:awareness', {
+        socketInstance.emit('yjs:awareness', {
           projectId: id,
           filePath: activeFile.path,
           update: encoding.toUint8Array(encoder)
@@ -328,8 +383,8 @@ const ProjectRoom = () => {
         
         syncProtocol.readSyncMessage(decoder, encoder, ydocRef.current, 'remote-socket');
 
-        if (encoding.length(encoder) > 0 && socket.connected) {
-          socket.emit('yjs:sync', {
+        if (encoding.length(encoder) > 0 && socketInstance.connected) {
+          socketInstance.emit('yjs:sync', {
             projectId: id,
             filePath: activeFile.path,
             update: encoding.toUint8Array(encoder)
@@ -352,19 +407,19 @@ const ProjectRoom = () => {
       }
     };
 
-    socket.on('yjs:sync', handleRemoteSync);
-    socket.on('yjs:awareness', handleRemoteAwareness);
+    socketInstance.on('yjs:sync', handleRemoteSync);
+    socketInstance.on('yjs:awareness', handleRemoteAwareness);
 
     // 9. Join the file room on the backend
-    socket.emit('yjs:join-file', {
+    socketInstance.emit('yjs:join-file', {
       projectId: id,
       filePath: activeFile.path,
       initialContent: activeFile.content || ''
     });
 
     return () => {
-      socket.off('yjs:sync', handleRemoteSync);
-      socket.off('yjs:awareness', handleRemoteAwareness);
+      socketInstance.off('yjs:sync', handleRemoteSync);
+      socketInstance.off('yjs:awareness', handleRemoteAwareness);
       ytext.unobserve(handleYdocChange);
       ydoc.off('update', handleLocalUpdate);
       awareness.off('update', handleLocalAwareness);
@@ -382,88 +437,129 @@ const ProjectRoom = () => {
         ydocRef.current = null;
       }
     };
-  }, [id, activeFile, user, editorInstance]);
+  }, [id, activeKey, activeFile?.path, user, editorInstance]);
 
   const handleSaveFile = async () => {
-    if (!activeFile?.path) return;
+    if (!activeTab || !activeTab.path) return;
 
     try {
-      const currentContent = editorRef.current?.getValue() || code;
-      await fileAPI.updateFileContent(id, { path: activeFile.path, content: currentContent });
-      
-      if (socketRef.current) {
-        socketRef.current.emit('filesystem:file-updated', {
-          projectId: id,
-          path: activeFile.path,
-          content: currentContent,
-        });
-      }
+      setSaveState('saving');
+      const currentContent = editorRef.current?.getValue() || activeTab.content;
+      await fileAPI.updateFileContent(id, { path: activeTab.path, content: currentContent });
+      patchTab(activeTab.key, { saved: currentContent, content: currentContent });
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 2000);
       toast.success('File saved');
     } catch (error) {
       console.error('Failed to save file:', error);
+      setSaveState('error');
       toast.error('Failed to save file');
     }
   };
 
-  const handleTyping = () => {
-    if (!socketRef.current || !id) return;
-    socketRef.current.emit('typing', { projectId: id, isTyping: true });
-    
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
+  const saveRef = useRef(handleSaveFile);
+  useEffect(() => { saveRef.current = handleSaveFile; }, [handleSaveFile]);
+
+  // Open / Close Tab helpers
+  const openFile = async (node, pathArray) => {
+    if (node.type !== 'file') return;
+    const next = makeActiveFile(node, pathArray);
+    const key = Array.isArray(pathArray) ? pathArray.join('/') : String(pathArray);
+
+    const existing = tabs.find(t => t.key === key);
+    if (existing) {
+      setActiveKey(key);
+      return;
     }
-    
-    typingTimeoutRef.current = setTimeout(() => {
-      handleStopTyping();
-    }, 2000);
-  };
 
-  const handleStopTyping = () => {
-    if (!socketRef.current || !id) return;
-    socketRef.current.emit('typing', { projectId: id, isTyping: false });
-    
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-  };
-
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-
-    handleStopTyping();
-
-    const messageData = {
-      projectId: id,
-      message: newMessage.trim(),
+    const newTab = {
+      key,
+      name: node.name,
+      path: pathArray,
+      content: node.content || '',
+      saved: node.content || '',
+      loading: false
     };
 
-    if (socketRef.current) {
-      socketRef.current.emit('chat-message', messageData, (response) => {
-        if (response && !response.success) {
-          toast.error('Failed to send message');
-        }
-      });
-      setNewMessage('');
-    }
-  };
-
-  const openFile = async (node, path) => {
-    if (node.type !== 'file') return;
-
-    const next = makeActiveFile(node, path);
-    setActiveFile(next);
-    setCode(next.content);
+    setTabs(prev => [...prev, newTab]);
+    setActiveKey(key);
 
     try {
-      const res = await fileAPI.getFileContent(id, path);
-      if (res?.success) {
-        setCode(res.data?.content ?? '');
+      const res = await fileAPI.getFileContent(id, pathArray);
+      if (res?.success && res.data?.content !== undefined) {
+        patchTab(key, { content: res.data.content, saved: res.data.content });
       }
     } catch (error) {
       console.error('Failed to load file content:', error);
     }
+  };
+
+  const openFileByPath = async (pathStr, line) => {
+    const parts = pathStr.split('/').filter(Boolean);
+    const name = parts[parts.length - 1] || 'untitled';
+    await openFile({ name, type: 'file' }, parts);
+    if (line && editorRef.current) {
+      editorRef.current.revealLineInCenter(line);
+      editorRef.current.setPosition({ lineNumber: line, column: 1 });
+    }
+  };
+
+  const closeTab = (key) => {
+    const idx = tabs.findIndex(t => t.key === key);
+    if (idx === -1) return;
+
+    const closing = tabs[idx];
+    closedStack.current.push(closing);
+
+    const newTabs = tabs.filter(t => t.key !== key);
+    setTabs(newTabs);
+
+    if (activeKey === key) {
+      const nextTab = newTabs[idx] || newTabs[idx - 1] || null;
+      setActiveKey(nextTab ? nextTab.key : null);
+    }
+  };
+
+  const runFile = (node, pathArray) => {
+    const filePath = Array.isArray(pathArray) ? pathArray.join('/') : String(pathArray);
+    setShowTerminal(true);
+    const termSocket = socketRef.current;
+    if (termSocket) {
+      termSocket.emit('terminal:run-file', { projectId: id, filePath });
+    }
+  };
+
+  const goToLine = (lineNumber) => {
+    if (editorRef.current && lineNumber > 0) {
+      editorRef.current.revealLineInCenter(lineNumber);
+      editorRef.current.setPosition({ lineNumber, column: 1 });
+      editorRef.current.focus();
+    }
+  };
+
+  const handleTyping = () => {
+    if (socketRef.current) {
+      socketRef.current.emit('user-typing', { projectId: id, isTyping: true });
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        socketRef.current.emit('user-typing', { projectId: id, isTyping: false });
+      }, 2000);
+    }
+  };
+
+  const handleSendMessage = (e) => {
+    if (e) e.preventDefault();
+    if (!newMessage.trim() || !socketRef.current) return;
+
+    socketRef.current.emit('chat-message', {
+      projectId: id,
+      message: newMessage.trim()
+    }, (res) => {
+      if (res && !res.success) {
+        toast.error('Failed to send message');
+      }
+    });
+    setNewMessage('');
   };
 
   const getFileLanguage = (fileName) => {
@@ -493,6 +589,15 @@ const ProjectRoom = () => {
     return languageMap[ext] || 'plaintext';
   };
 
+  const commands = [
+    { id: 'save', label: 'Save Current File', shortcut: 'Ctrl+S', run: () => saveRef.current() },
+    { id: 'quick-open', label: 'Quick Open File', shortcut: 'Ctrl+P', run: () => setPalette('file') },
+    { id: 'go-to-line', label: 'Go to Line...', shortcut: 'Ctrl+G', run: () => setPalette('line') },
+    { id: 'toggle-terminal', label: 'Toggle Integrated Terminal', shortcut: 'Ctrl+`', run: () => setShowTerminal(v => !v) },
+    { id: 'version-history', label: 'View Version History', run: () => setShowVersionHistory(true) },
+    { id: 'activity-timeline', label: 'View Project Activity Timeline', run: () => setShowActivityPanel(true) },
+  ];
+
   return (
     <div className="flex flex-col h-screen bg-vscode-bg text-vscode-text">
       {/* Top Header */}
@@ -515,6 +620,20 @@ const ProjectRoom = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Version History Toggle */}
+          <button
+            onClick={() => setShowVersionHistory(!showVersionHistory)}
+            className={`px-3 py-1.5 text-sm rounded transition-colors flex items-center gap-1.5 ${
+              showVersionHistory 
+                ? 'bg-vscode-accent text-white' 
+                : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
+            }`}
+            title="Version Control"
+          >
+            <History className="w-4 h-4" />
+            <span>History</span>
+          </button>
+
           {/* Activity Timeline Toggle */}
           <button
             onClick={() => setShowActivityPanel(!showActivityPanel)}
@@ -541,32 +660,23 @@ const ProjectRoom = () => {
             Terminal
           </button>
 
-          {/* Chat Toggle */}
-          <button
-            onClick={() => {
-              setShowChat(!showChat);
-              if (!showChat) setUnreadMessages(0);
-            }}
-            className={`relative px-3 py-1.5 text-sm rounded transition-colors ${
-              showChat 
-                ? 'bg-vscode-accent text-white' 
-                : 'bg-vscode-bg text-vscode-text hover:bg-vscode-border'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4 inline mr-1" />
-            Chat
-            {unreadMessages > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                {unreadMessages}
-              </span>
-            )}
-          </button>
+          {/* Open Preview */}
+          {activeFile && isPreviewable(activeFile.name) && (
+            <button
+              onClick={() => window.open(fileAPI.previewUrl(id, activeFile.path), '_blank', 'noopener')}
+              className="px-3 py-1.5 text-sm rounded bg-vscode-bg text-vscode-text hover:bg-vscode-border"
+              title="Open in browser"
+            >
+              <Globe className="w-4 h-4 mr-1.5 inline" />
+              Preview
+            </button>
+          )}
 
           {/* Save Button */}
           {activeFile && (
             <button
               onClick={handleSaveFile}
-              className="px-3 py-1.5 text-sm bg-vscode-accent text-white rounded hover:bg-opacity-90 transition-colors flex items-center gap-1"
+              className="btn-primary px-3 py-1.5 text-sm flex items-center gap-1"
             >
               <Save className="w-4 h-4" />
               Save
@@ -588,42 +698,72 @@ const ProjectRoom = () => {
         {/* Activity Bar (VS Code left strip) */}
         <ActivityBar activeView={sidebarView} onViewChange={setSidebarView} />
 
-        {/* Primary Sidebar (Explorer / Extensions) */}
+        {/* Primary Sidebar */}
         {sidebarView && (
-          <div className="w-64 bg-vscode-panel border-r border-vscode-border flex flex-col">
+          <aside className="w-64 bg-vscode-panel border-r border-vscode-border flex flex-col">
             {sidebarView === 'explorer' && (
               <FileExplorer
                 projectId={id}
-                socket={socketRef.current}
+                socket={socket}
                 activeFile={activeFile}
                 onFileSelect={openFile}
+                onRunFile={runFile}
               />
             )}
+            {sidebarView === 'search' && (
+              <SearchPanel
+                projectId={id}
+                onOpenResult={(hit) => openFileByPath(hit.path, hit.line)}
+              />
+            )}
+            {sidebarView === 'ports' && <PortsPanel projectId={id} />}
             {sidebarView === 'extensions' && <ExtensionsPanel />}
-          </div>
+          </aside>
         )}
 
-        {/* Editor Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Central Editor & Tabs Area */}
+        <div className="flex-1 flex flex-col min-w-0 bg-vscode-bg">
           {activeFile ? (
             <>
               {/* Tab Bar */}
-              <div className="h-9 bg-vscode-panel border-b border-vscode-border flex items-center justify-between px-3">
-                <div className="flex items-center gap-2">
-                  <FileCode className="w-4 h-4 text-vscode-accent" />
-                  <span className="text-sm">{activeFile.name}</span>
-                  <span className="text-xs text-vscode-textMuted">
-                    ({Array.isArray(activeFile.path) ? activeFile.path.join('/') : activeFile.path})
-                  </span>
+              <div className="h-9 bg-vscode-sidebar border-b border-vscode-border flex items-center justify-between px-2 overflow-x-auto">
+                <div className="flex items-center gap-1">
+                  {tabs.map((tab) => (
+                    <div
+                      key={tab.key}
+                      onClick={() => setActiveKey(tab.key)}
+                      className={`group flex items-center gap-2 px-3 py-1 text-xs rounded-t border-b-2 cursor-pointer transition-colors ${
+                        activeKey === tab.key
+                          ? 'bg-vscode-bg text-vscode-text border-vscode-accent'
+                          : 'bg-transparent text-vscode-textMuted border-transparent hover:bg-vscode-panel'
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{tab.name}</span>
+                      {isDirty(tab) && (
+                        <span className="w-2 h-2 rounded-full bg-vscode-accent" />
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeTab(tab.key);
+                        }}
+                        className="p-0.5 rounded hover:bg-vscode-border opacity-0 group-hover:opacity-100"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-1.5">
+
+                <div className="flex items-center gap-1.5 mr-2">
                   <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" title="CRDT Live Sync Active" />
                   <span className="text-xs text-vscode-textMuted font-mono">Yjs CRDT</span>
                 </div>
               </div>
 
               {/* Monaco Editor */}
-              <div className="flex-1">
+              <div className="flex-1 relative">
                 <Editor
                   height="100%"
                   language={getFileLanguage(activeFile.name)}
@@ -663,8 +803,12 @@ const ProjectRoom = () => {
                     monacoRef.current = monaco;
                     setEditorInstance(editor);
 
+                    editor.onDidChangeCursorPosition((e) => {
+                      setCursorPosition({ lineNumber: e.position.lineNumber, column: e.position.column });
+                    });
+
                     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                      handleSaveFile();
+                      saveRef.current();
                     });
 
                     editor.focus();
@@ -698,6 +842,29 @@ const ProjectRoom = () => {
                   }}
                 />
               </div>
+
+              {/* Editor Status Bar */}
+              <div className="h-6 bg-vscode-panel border-t border-vscode-border flex items-center justify-between px-4 text-xs text-vscode-textMuted">
+                <div className="flex items-center gap-4">
+                  <span>Line {cursorPosition.lineNumber}, Col {cursorPosition.column}</span>
+                  <span className="capitalize">{getFileLanguage(activeFile.name)}</span>
+                  <span className={saveState === 'error' ? 'text-red-400' : ''}>
+                    {saveState === 'saving'
+                      ? 'Saving…'
+                      : saveState === 'error'
+                        ? 'Save failed'
+                        : isDirty(activeTab)
+                          ? 'Unsaved'
+                          : 'Saved'}
+                  </span>
+                  {isConnected && (
+                    <span className="flex items-center gap-1 text-green-400">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                      Connected
+                    </span>
+                  )}
+                </div>
+              </div>
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-vscode-textMuted bg-[#0D0F12]">
@@ -707,60 +874,96 @@ const ProjectRoom = () => {
             </div>
           )}
 
-          {/* Terminal Panel */}
+          {/* Integrated Terminal Panel */}
           {showTerminal && (
             <div className="h-64 border-t border-vscode-border">
-              <TerminalPanel projectId={id} />
+              <TerminalPanel
+                socket={socket}
+                projectId={id}
+                isVisible={showTerminal}
+                onToggle={() => setShowTerminal(!showTerminal)}
+              />
             </div>
           )}
         </div>
 
-        {/* Right Panel: Project Chat & WebRTC Calling */}
-        {showChat && (
-          <div className="w-80 border-l border-vscode-border flex flex-col bg-vscode-panel">
-            <VideoChatPanel
-              projectId={id}
-              socket={socketRef.current}
-              user={user}
-              currentUser={user}
-              messages={messages}
-              newMessage={newMessage}
-              onMessageChange={(e) => {
-                setNewMessage(e.target.value);
-                handleTyping();
-              }}
-              onSendMessage={handleSendMessage}
-              typingUsers={typingUsers}
-              showChat={showChat}
-              onToggleChat={setShowChat}
-              unreadMessages={unreadMessages}
-            />
-          </div>
-        )}
+        {/* Right Sidebar - Video & Project Chat */}
+        <div className="w-80 border-l border-vscode-border flex flex-col bg-vscode-panel">
+          <VideoChatPanel
+            socket={socket}
+            projectId={id}
+            user={user}
+            currentUser={user}
+            onlineUsers={onlineUsers}
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            newMessage={newMessage}
+            onMessageChange={(e) => {
+              setNewMessage(e.target.value);
+              handleTyping();
+            }}
+            typingUsers={typingUsers}
+            showChat={showChat}
+            onToggleChat={(isChat) => {
+              setShowChat(isChat);
+              if (isChat) setUnreadMessages(0);
+            }}
+            unreadMessages={unreadMessages}
+          />
+        </div>
 
-        {/* Activity Timeline Slide-out Panel */}
+        {/* Activity Timeline Slide-out */}
         {showActivityPanel && (
-          <div className="w-96 border-l border-vscode-border flex flex-col bg-vscode-panel z-40">
-            <div className="p-3 border-b border-vscode-border flex items-center justify-between">
+          <aside className="w-96 bg-vscode-panel border-l border-vscode-border flex flex-col z-40">
+            <div className="flex items-center justify-between p-3 border-b border-vscode-border">
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-vscode-accent" />
-                <h3 className="text-sm font-semibold">Project Activity Timeline</h3>
+                <h2 className="font-semibold text-sm text-white">Activity Timeline</h2>
               </div>
               <button
                 onClick={() => setShowActivityPanel(false)}
-                className="p-1 hover:bg-vscode-bg rounded text-vscode-textMuted hover:text-vscode-text"
+                className="p-1 hover:bg-vscode-bg rounded text-vscode-textMuted hover:text-vscode-text transition-colors"
+                title="Close Activity Timeline"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex-1 overflow-hidden">
-              <ProjectTimeline projectId={id} socket={socketRef.current} />
+            <div className="flex-1 overflow-y-auto">
+              <ProjectTimeline projectId={id} socket={socket} />
             </div>
-          </div>
+          </aside>
+        )}
+
+        {/* Version History Slide-out */}
+        {showVersionHistory && (
+          <VersionHistoryPanel
+            activeFile={activeTab}
+            projectId={id}
+            currentCode={activeTab?.content || ''}
+            onClose={() => setShowVersionHistory(false)}
+            onVersionRestored={(restoredCode) => {
+              if (activeTab) {
+                patchTab(activeTab.key, { content: restoredCode, saved: restoredCode });
+              }
+            }}
+          />
         )}
       </div>
 
-      {/* Floating AI Assistant Button & Panel */}
+      {/* Command Palette */}
+      {palette && (
+        <CommandPalette
+          mode={palette}
+          commands={commands}
+          fileTree={fileTree}
+          onRunCommand={(command) => command.run()}
+          onOpenFile={(file) => openFileByPath(file.path)}
+          onGoToLine={goToLine}
+          onClose={() => setPalette(null)}
+        />
+      )}
+
+      {/* Floating AI Assistant (Ask Mode) */}
       <AIToggleButton />
       <AIInterface />
     </div>

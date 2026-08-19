@@ -1,563 +1,251 @@
 /**
- * Terminal Socket Handlers
- * Real-time terminal communication via Socket.io
+ * Terminal socket handlers.
+ *
+ * WHY a PTY: the previous version ran one `spawn()` per submitted line, which cannot support a
+ * shell the way VS Code does - `cd` did not persist, nothing could read stdin, there was no
+ * history/completion, no window size, and interactive programs (python, node, vim) hung. A
+ * pseudo-terminal gives the shell a real terminal device, so we only relay bytes: keystrokes in,
+ * rendered output out. All line editing now belongs to the shell, not to our JS.
  */
 
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import pty from 'node-pty';
 import { executionBlockedNotice } from '../config/execution.js';
+import { buildTree } from '../controllers/FileSystemController.js';
+import Project from '../models/Project.js';
 
-// Store active terminal sessions per socket
-const terminalSessions = new Map();
-const processMap = new Map();
+// terminalId -> { socketId, projectId, proc, cwd }
+const sessions = new Map();
+
+// WHY a cap: each session is a real OS process. Without a limit a client loop can fork-bomb the host.
+const MAX_SESSIONS_PER_SOCKET = 8;
+
+const projectDir = (projectId) => path.join(process.cwd(), 'projects', projectId);
 
 /**
- * Setup Terminal Socket Handlers
+ * A terminal is a shell on the host, so being logged in is not enough - the caller has to belong to
+ * the project whose directory they are asking for.
  */
+const canUseProject = async (projectId, userId) => {
+  if (!userId) return false;
+  const project = await Project.findOne({
+    _id: projectId,
+    $or: [{ ownerId: userId }, { 'members.userId': userId }],
+  }).select('_id');
+  return Boolean(project);
+};
+
+// The shell a user expects on this platform. Windows gets PowerShell unless they asked otherwise.
+const shellFor = (requested) => {
+  if (os.platform() === 'win32') {
+    if (requested === 'cmd') return { file: 'cmd.exe', args: [] };
+    if (requested === 'bash') return { file: 'bash.exe', args: ['-l'] };
+    return { file: 'powershell.exe', args: ['-NoLogo'] };
+  }
+  const file = process.env.SHELL || (os.platform() === 'darwin' ? '/bin/zsh' : '/bin/bash');
+  return { file, args: ['-l'] };
+};
+
+const countSessions = (socketId) => {
+  let count = 0;
+  for (const session of sessions.values()) {
+    if (session.socketId === socketId) count += 1;
+  }
+  return count;
+};
+
+// Only the socket that created a terminal may type into it or resize it.
+const ownedSession = (terminalId, socket) => {
+  const session = sessions.get(terminalId);
+  if (!session || session.socketId !== socket.id) return null;
+  return session;
+};
+
+const destroySession = (terminalId) => {
+  const session = sessions.get(terminalId);
+  if (!session) return;
+  try {
+    session.proc.kill();
+  } catch (error) {
+    console.error('[Terminal] Error killing pty:', error.message);
+  }
+  sessions.delete(terminalId);
+};
+
 export const setupTerminalSockets = (io) => {
   io.on('connection', (socket) => {
     console.log(`[Terminal] Socket connected: ${socket.id}`);
 
     /**
-     * Create Terminal Session
+     * Create a terminal: spawn a shell in a PTY rooted at the project directory.
      */
-    socket.on('terminal:create', async ({ terminalId, projectId, shell = 'powershell' }) => {
+    socket.on('terminal:create', async ({ terminalId, projectId, shell, cols = 80, rows = 24 }) => {
       try {
-        console.log(`[Terminal] Creating terminal: ${terminalId} for project: ${projectId}`);
-
-        // Get project directory
-        const projectDir = path.join(process.cwd(), 'projects', projectId);
-        
-        // Create directory if it doesn't exist
-        if (!fs.existsSync(projectDir)) {
-          fs.mkdirSync(projectDir, { recursive: true });
-        }
-
-        // Store session
-        terminalSessions.set(terminalId, {
-          socketId: socket.id,
-          projectId,
-          shell,
-          cwd: projectDir,
-          createdAt: Date.now(),
-        });
-
-        // Join project room
-        socket.join(`project:${projectId}`);
-
-        // Emit success
-        socket.emit('terminal:created', {
-          terminalId,
-          cwd: projectDir,
-        });
-      } catch (error) {
-        console.error('[Terminal] Error creating terminal:', error);
-        socket.emit('terminal:error', {
-          terminalId,
-          error: error.message,
-        });
-      }
-    });
-
-    /**
-     * Execute Command
-     */
-    socket.on('terminal:execute', async ({ terminalId, projectId, command }) => {
-      try {
-        // Default-deny: execution is unsandboxed today, so it stays off until M3 (see config/execution.js).
         const blocked = executionBlockedNotice();
         if (blocked) {
           socket.emit('terminal:error', { terminalId, error: blocked.message });
           return;
         }
 
-        console.log(`[Terminal] Executing command in ${terminalId}: ${command}`);
-
-        const session = terminalSessions.get(terminalId);
-        if (!session) {
+        if (!terminalId || !projectId) {
           socket.emit('terminal:error', {
             terminalId,
-            error: 'Terminal session not found',
+            error: 'terminal:create needs both terminalId and projectId',
           });
           return;
         }
 
-        // Kill any existing process
-        if (processMap.has(terminalId)) {
-          const oldProcess = processMap.get(terminalId);
-          try {
-            if (os.platform() === 'win32') {
-              spawn('taskkill', ['/pid', oldProcess.pid.toString(), '/f', '/t']);
-            } else {
-              process.kill(-oldProcess.pid);
-            }
-          } catch (error) {
-            console.error('[Terminal] Error killing old process:', error);
-          }
-          processMap.delete(terminalId);
+        if (!(await canUseProject(projectId, socket.userId))) {
+          socket.emit('terminal:error', {
+            terminalId,
+            error: 'You do not have access to this project.',
+          });
+          return;
         }
 
-        // Determine shell and args
-        let shell, args;
-        if (os.platform() === 'win32') {
-          if (session.shell === 'cmd') {
-            shell = 'cmd.exe';
-            args = ['/c', command];
-          } else if (session.shell === 'bash') {
-            shell = 'bash.exe';
-            args = ['-c', command];
-          } else {
-            shell = 'powershell.exe';
-            args = ['-NoProfile', '-Command', command];
-          }
-        } else if (os.platform() === 'darwin') {
-          shell = 'zsh';
-          args = ['-c', command];
-        } else {
-          shell = 'bash';
-          args = ['-c', command];
+        // A reconnect or hot reload can re-create an id we already hold; replace the old pty
+        // instead of leaking it.
+        destroySession(terminalId);
+
+        if (countSessions(socket.id) >= MAX_SESSIONS_PER_SOCKET) {
+          socket.emit('terminal:error', {
+            terminalId,
+            error: `Terminal limit reached (${MAX_SESSIONS_PER_SOCKET} per connection).`,
+          });
+          return;
         }
 
-        // Spawn process
-        const childProcess = spawn(shell, args, {
-          cwd: session.cwd,
+        // buildTree seeds the directory on first use; the shell and the explorer read the same
+        // bytes, so there is nothing to mirror.
+        await buildTree(projectId);
+        const cwd = projectDir(projectId);
+        fs.mkdirSync(cwd, { recursive: true });
+
+        const { file, args } = shellFor(shell);
+        const proc = pty.spawn(file, args, {
+          name: 'xterm-256color',
+          cols,
+          rows,
+          cwd,
           env: {
             ...process.env,
-            FORCE_COLOR: '1',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
+            FORCE_COLOR: '1',
+            PYTHONUNBUFFERED: '1',
+            PYTHONIOENCODING: 'utf-8',
           },
-          detached: os.platform() !== 'win32', // For Unix systems
-          windowsHide: true,
         });
 
-        // Store process
-        processMap.set(terminalId, childProcess);
+        sessions.set(terminalId, { socketId: socket.id, projectId, proc, cwd });
 
-        // Handle stdout
-        childProcess.stdout.on('data', (data) => {
-          const output = data.toString();
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output,
-          });
+        // Output goes to the creating socket only: a shell on the host is not something to
+        // broadcast to every collaborator in the room. Files the shell writes are picked up by
+        // ProjectWatcher, which watches the directory itself.
+        proc.onData((data) => socket.emit('terminal:output', { terminalId, output: data }));
+
+        proc.onExit(({ exitCode }) => {
+          sessions.delete(terminalId);
+          socket.emit('terminal:exit', { terminalId, code: exitCode });
         });
 
-        // Handle stderr
-        childProcess.stderr.on('data', (data) => {
-          const output = data.toString();
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output,
-          });
-        });
-
-        // Handle exit
-        childProcess.on('close', (code) => {
-          console.log(`[Terminal] Process exited with code: ${code}`);
-          processMap.delete(terminalId);
-          io.to(`project:${projectId}`).emit('terminal:exit', {
-            terminalId,
-            code,
-          });
-        });
-
-        // Handle error
-        childProcess.on('error', (error) => {
-          console.error('[Terminal] Process error:', error);
-          processMap.delete(terminalId);
-          io.to(`project:${projectId}`).emit('terminal:error', {
-            terminalId,
-            error: error.message,
-          });
-        });
-
-        // Set timeout (2 minutes)
-        setTimeout(() => {
-          if (processMap.has(terminalId)) {
-            const proc = processMap.get(terminalId);
-            try {
-              if (os.platform() === 'win32') {
-                spawn('taskkill', ['/pid', proc.pid.toString(), '/f', '/t']);
-              } else {
-                process.kill(-proc.pid);
-              }
-            } catch (error) {
-              console.error('[Terminal] Error killing timeout process:', error);
-            }
-            processMap.delete(terminalId);
-            io.to(`project:${projectId}`).emit('terminal:output', {
-              terminalId,
-              output: '\r\n\x1b[33m[Process killed - 2 minute timeout]\x1b[0m\r\n',
-            });
-          }
-        }, 120000);
+        socket.emit('terminal:created', { terminalId, cwd, shell: file, pid: proc.pid });
+        console.log(`[Terminal] ${terminalId} -> ${file} (pid ${proc.pid}) in ${cwd}`);
       } catch (error) {
-        console.error('[Terminal] Error executing command:', error);
-        socket.emit('terminal:error', {
-          terminalId,
-          error: error.message,
-        });
+        console.error('[Terminal] Error creating terminal:', error);
+        socket.emit('terminal:error', { terminalId, error: error.message });
       }
     });
 
     /**
-     * Run File - Shortcut to execute file in terminal
+     * Raw keystrokes from xterm: Enter, Ctrl+C, arrows, Tab. The shell interprets them, we do not.
      */
-    socket.on('terminal:run-file', async ({ projectId, command, fileName, filePath }) => {
+    socket.on('terminal:input', ({ terminalId, data }) => {
+      const session = ownedSession(terminalId, socket);
+      if (!session || typeof data !== 'string') return;
+      session.proc.write(data);
+    });
+
+    /**
+     * Window size. Without this the shell wraps at the wrong column and full-screen apps misdraw.
+     */
+    socket.on('terminal:resize', ({ terminalId, cols, rows }) => {
+      const session = ownedSession(terminalId, socket);
+      if (!session) return;
       try {
-        // Default-deny: execution is unsandboxed today, so it stays off until M3 (see config/execution.js).
+        session.proc.resize(Math.max(2, cols | 0), Math.max(2, rows | 0));
+      } catch (error) {
+        console.error('[Terminal] Resize failed:', error.message);
+      }
+    });
+
+    /**
+     * Type a whole command at once (Run button, or any programmatic caller).
+     */
+    socket.on('terminal:execute', ({ terminalId, command }) => {
+      if (!command) return;
+      const session = ownedSession(terminalId, socket);
+      if (!session) {
+        socket.emit('terminal:error', { terminalId, error: 'Terminal session not found' });
+        return;
+      }
+      session.proc.write(`${command}\r`);
+    });
+
+    /**
+     * Run the file the user clicked. The mirror already put it on disk, so this is exactly what a
+     * user typing the command themselves would do.
+     */
+    socket.on('terminal:run-file', async ({ projectId, command, fileName }) => {
+      try {
         const blocked = executionBlockedNotice();
         if (blocked) {
           socket.emit('terminal:error', { error: blocked.message });
           return;
         }
 
-        console.log(`[Terminal] Running file: ${fileName} with command: ${command}`);
-        console.log(`[Terminal] File path: ${filePath}`);
-
-        // Find or create a terminal session for this user
-        let terminalId = null;
-        let session = null;
-        
-        for (const [id, sess] of terminalSessions.entries()) {
-          if (sess.socketId === socket.id && sess.projectId === projectId) {
-            terminalId = id;
-            session = sess;
-            break;
-          }
-        }
-
-        // If no terminal exists, create one
-        if (!terminalId) {
-          terminalId = `terminal-run-${Date.now()}`;
-          const projectDir = path.join(process.cwd(), 'projects', projectId);
-          
-          if (!fs.existsSync(projectDir)) {
-            fs.mkdirSync(projectDir, { recursive: true });
-          }
-
-          session = {
-            socketId: socket.id,
-            projectId,
-            shell: 'powershell',
-            cwd: projectDir,
-            createdAt: Date.now(),
-          };
-
-          terminalSessions.set(terminalId, session);
-          socket.join(`project:${projectId}`);
-        }
-
-        // Import File model dynamically to avoid circular dependencies
-        const File = (await import('../models/File.js')).default;
-        
-        // Find file in database
-        let fileDoc = await File.findOne({
-          projectId,
-          path: filePath || fileName,
-          isDeleted: false
-        });
-
-        if (!fileDoc) {
-          console.error(`[Terminal] File not found in database: ${filePath || fileName}`);
-          
-          // Try alternative search (maybe file was saved with different path format)
-          const alternativeFile = await File.findOne({
-            projectId,
-            name: fileName,
-            isDeleted: false
-          });
-          
-          if (alternativeFile) {
-            console.log(`[Terminal] Found file with alternative search: ${alternativeFile.path}`);
-            // Use the alternative file
-            fileDoc = alternativeFile;
-          } else {
-            io.to(`project:${projectId}`).emit('terminal:output', {
-              terminalId,
-              output: `\r\n\x1b[31m━━━━━ Error ━━━━━\x1b[0m\r\n\x1b[31mFile not found in project: ${filePath || fileName}\x1b[0m\r\n\x1b[90mPlease make sure the file is saved before running.\x1b[0m\r\n`,
-            });
-            return;
-          }
-        }
-
-        // Verify file has content
-        if (!fileDoc.content && fileDoc.content !== '') {
-          console.warn(`[Terminal] File has no content: ${fileName}`);
-        }
-
-        // Create file on filesystem temporarily
-        const fileFullPath = path.join(session.cwd, filePath || fileName);
-        const fileDir = path.dirname(fileFullPath);
-        
-        // Create directory if it doesn't exist
-        if (!fs.existsSync(fileDir)) {
-          fs.mkdirSync(fileDir, { recursive: true });
-        }
-        
-        // Write file content to filesystem
-        fs.writeFileSync(fileFullPath, fileDoc.content || '', 'utf8');
-        console.log(`[Terminal] File written to: ${fileFullPath}`);
-
-        // Emit output header
-        io.to(`project:${projectId}`).emit('terminal:output', {
-          terminalId,
-          output: `\r\n\x1b[36m━━━━━ Running: ${fileName} ━━━━━\x1b[0m\r\n\x1b[90m$ ${command}\x1b[0m\r\n`,
-        });
-
-        // Kill any existing process for this terminal
-        if (processMap.has(terminalId)) {
-          console.log(`[Terminal] Killing existing process for terminal: ${terminalId}`);
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output: '\x1b[33m[Stopping previous process...]\x1b[0m\r\n',
-          });
-          
-          const oldProcess = processMap.get(terminalId);
-          try {
-            if (os.platform() === 'win32') {
-              spawn('taskkill', ['/pid', oldProcess.pid.toString(), '/f', '/t']);
-            } else {
-              process.kill(-oldProcess.pid);
-            }
-          } catch (error) {
-            console.error('[Terminal] Error killing old process:', error);
-          }
-          processMap.delete(terminalId);
-        }
-
-        // Determine shell and args
-        let shell, args;
-        if (os.platform() === 'win32') {
-          shell = 'powershell.exe';
-          args = ['-NoProfile', '-Command', command];
-        } else if (os.platform() === 'darwin') {
-          shell = 'zsh';
-          args = ['-c', command];
-        } else {
-          shell = 'bash';
-          args = ['-c', command];
-        }
-
-        console.log(`[Terminal] Executing with shell: ${shell}, args:`, args);
-        console.log(`[Terminal] Working directory: ${session.cwd}`);
-
-        // Spawn process
-        const childProcess = spawn(shell, args, {
-          cwd: session.cwd,
-          env: {
-            ...process.env,
-            FORCE_COLOR: '1',
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            PYTHONUNBUFFERED: '1', // Important for Python output
-            PYTHONIOENCODING: 'utf-8', // Ensure proper encoding
-          },
-          detached: os.platform() !== 'win32',
-          windowsHide: true,
-          shell: true, // Use shell to resolve commands
-        });
-
-        // Store process
-        processMap.set(terminalId, childProcess);
-
-        // Handle stdout
-        childProcess.stdout.on('data', (data) => {
-          const output = data.toString();
-          console.log(`[Terminal] Output from ${fileName}:`, output);
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output,
-          });
-        });
-
-        // Handle stderr
-        childProcess.stderr.on('data', (data) => {
-          const output = data.toString();
-          console.log(`[Terminal] Error output from ${fileName}:`, output);
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output,
-          });
-        });
-
-        // Handle exit
-        childProcess.on('close', (code) => {
-          console.log(`[Terminal] ${fileName} exited with code: ${code}`);
-          processMap.delete(terminalId);
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output: `\r\n\x1b[${code === 0 ? '32' : '31'}m━━━━━ Process exited with code ${code} ━━━━━\x1b[0m\r\n`,
-          });
-          io.to(`project:${projectId}`).emit('terminal:exit', {
-            terminalId,
-            code,
-          });
-          
-          // Optional: Clean up temporary file after execution
-          // Commented out to keep files for debugging/future runs
-          // try {
-          //   if (fs.existsSync(fileFullPath)) {
-          //     fs.unlinkSync(fileFullPath);
-          //     console.log(`[Terminal] Cleaned up temporary file: ${fileFullPath}`);
-          //   }
-          // } catch (cleanupError) {
-          //   console.error(`[Terminal] Error cleaning up file:`, cleanupError);
-          // }
-        });
-
-        // Handle error
-        childProcess.on('error', (error) => {
-          console.error('[Terminal] Process error:', error);
-          processMap.delete(terminalId);
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output: `\r\n\x1b[31mError: ${error.message}\x1b[0m\r\n`,
-          });
-          io.to(`project:${projectId}`).emit('terminal:error', {
-            terminalId,
-            error: error.message,
-          });
-        });
-
-        // Set timeout (2 minutes)
-        setTimeout(() => {
-          if (processMap.has(terminalId)) {
-            const proc = processMap.get(terminalId);
-            try {
-              if (os.platform() === 'win32') {
-                spawn('taskkill', ['/pid', proc.pid.toString(), '/f', '/t']);
-              } else {
-                process.kill(-proc.pid);
-              }
-            } catch (error) {
-              console.error('[Terminal] Error killing timeout process:', error);
-            }
-            processMap.delete(terminalId);
-            io.to(`project:${projectId}`).emit('terminal:output', {
-              terminalId,
-              output: '\r\n\x1b[33m[Process killed - 2 minute timeout]\x1b[0m\r\n',
-            });
-          }
-        }, 120000);
-
-      } catch (error) {
-        console.error('[Terminal] Error running file:', error);
-        socket.emit('terminal:error', {
-          error: error.message,
-        });
-      }
-    });
-
-    /**
-     * Kill Process
-     */
-    socket.on('terminal:kill', async ({ terminalId, projectId }) => {
-      try {
-        console.log(`[Terminal] Killing process: ${terminalId}`);
-
-        if (!processMap.has(terminalId)) {
-          console.log(`[Terminal] No running process found for: ${terminalId}`);
-          // Don't emit error - process might have already finished
-          io.to(`project:${projectId}`).emit('terminal:output', {
-            terminalId,
-            output: '\r\n\x1b[90m[No running process to kill]\x1b[0m\r\n',
+        // Owning a session for this project is itself the access check - terminal:create made it.
+        const entry = [...sessions.entries()].find(
+          ([, session]) => session.socketId === socket.id && session.projectId === projectId
+        );
+        if (!entry) {
+          socket.emit('terminal:error', {
+            error: 'No terminal open. Open the terminal panel, then run again.',
           });
           return;
         }
 
-        const childProcess = processMap.get(terminalId);
-        
-        try {
-          if (os.platform() === 'win32') {
-            // Windows: Use taskkill to kill process tree
-            spawn('taskkill', ['/pid', childProcess.pid.toString(), '/f', '/t']);
-          } else {
-            // Unix: Kill process group
-            process.kill(-childProcess.pid);
-          }
-        } catch (error) {
-          console.error('[Terminal] Error killing process:', error);
-        }
-
-        processMap.delete(terminalId);
-
-        io.to(`project:${projectId}`).emit('terminal:exit', {
+        const [terminalId, session] = entry;
+        socket.emit('terminal:output', {
           terminalId,
-          code: 'SIGKILL',
+          output: `\r\n\x1b[36m> Running ${fileName}\x1b[0m\r\n`,
         });
+        session.proc.write(`${command}\r`);
       } catch (error) {
-        console.error('[Terminal] Error killing process:', error);
-        socket.emit('terminal:error', {
-          terminalId,
-          error: error.message,
-        });
+        console.error('[Terminal] Error running file:', error);
+        socket.emit('terminal:error', { error: error.message });
       }
     });
 
     /**
-     * Close Terminal
+     * Interrupt the foreground program - the same byte Ctrl+C sends.
      */
-    socket.on('terminal:close', async ({ terminalId, projectId }) => {
-      try {
-        console.log(`[Terminal] Closing terminal: ${terminalId}`);
-
-        // Kill any running process
-        if (processMap.has(terminalId)) {
-          const childProcess = processMap.get(terminalId);
-          try {
-            if (os.platform() === 'win32') {
-              spawn('taskkill', ['/pid', childProcess.pid.toString(), '/f', '/t']);
-            } else {
-              process.kill(-childProcess.pid);
-            }
-          } catch (error) {
-            console.error('[Terminal] Error killing process:', error);
-          }
-          processMap.delete(terminalId);
-        }
-
-        // Remove session
-        terminalSessions.delete(terminalId);
-      } catch (error) {
-        console.error('[Terminal] Error closing terminal:', error);
-      }
+    socket.on('terminal:kill', ({ terminalId }) => {
+      const session = ownedSession(terminalId, socket);
+      if (session) session.proc.write('\x03');
     });
 
-    /**
-     * Handle disconnect
-     */
+    socket.on('terminal:close', ({ terminalId }) => {
+      if (ownedSession(terminalId, socket)) destroySession(terminalId);
+    });
+
     socket.on('disconnect', () => {
       console.log(`[Terminal] Socket disconnected: ${socket.id}`);
-
-      // Clean up terminals owned by this socket
-      const terminalsToClean = [];
-      for (const [terminalId, session] of terminalSessions.entries()) {
-        if (session.socketId === socket.id) {
-          terminalsToClean.push(terminalId);
-        }
+      for (const [terminalId, session] of sessions.entries()) {
+        if (session.socketId === socket.id) destroySession(terminalId);
       }
-
-      // Kill processes and remove sessions
-      terminalsToClean.forEach((terminalId) => {
-        if (processMap.has(terminalId)) {
-          const childProcess = processMap.get(terminalId);
-          try {
-            if (os.platform() === 'win32') {
-              spawn('taskkill', ['/pid', childProcess.pid.toString(), '/f', '/t']);
-            } else {
-              process.kill(-childProcess.pid);
-            }
-          } catch (error) {
-            console.error('[Terminal] Error killing process on disconnect:', error);
-          }
-          processMap.delete(terminalId);
-        }
-        terminalSessions.delete(terminalId);
-      });
     });
   });
 };

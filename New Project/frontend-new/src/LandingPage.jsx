@@ -9,7 +9,7 @@ import Footer from './components/Footer';
 
 function LandingPage() {
   return (
-    <div className="landing-page min-h-screen bg-slate-900">
+    <div className="landing-page min-h-screen bg-land-ink">
       <Navbar />
       
       <Hero />

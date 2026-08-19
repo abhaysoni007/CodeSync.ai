@@ -45,7 +45,7 @@ const TypingAnimation = ({ texts, typingSpeed = 100, deletingSpeed = 50, pauseTi
     <span className="inline-block">
       {currentText}
       <span
-        className={`inline-block w-0.5 h-6 ml-1 bg-cyan-400 ${
+        className={`inline-block w-0.5 h-6 ml-1 bg-land-accent ${
           showCursor ? 'opacity-100' : 'opacity-0'
         } transition-opacity duration-100`}
       />

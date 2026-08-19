@@ -10,6 +10,7 @@ import Activity from '../models/Activity.js';
 import RoomMember from '../models/RoomMember.js';
 import Room from '../models/Room.js';
 import File from '../models/File.js';
+import { startWatching, stopWatching } from './ProjectWatcher.js';
 
 // Debounce helper for activity logging
 const activityDebounce = new Map();
@@ -39,8 +40,8 @@ const logAndBroadcastActivity = async (io, activityData) => {
   }
 };
 
-const logFileEdit = (projectId, userId, username, fileId, fileName, io) => {
-  const key = `${projectId}-${fileId}-${userId}`;
+const logFileEdit = (projectId, userId, username, filePath, fileName, io) => {
+  const key = `${projectId}-${filePath}-${userId}`;
   
   if (activityDebounce.has(key)) {
     clearTimeout(activityDebounce.get(key));
@@ -54,7 +55,7 @@ const logFileEdit = (projectId, userId, username, fileId, fileName, io) => {
       action: `${username} edited file ${fileName}`,
       metadata: {
         fileName,
-        fileId
+        filePath
       }
     });
     activityDebounce.delete(key);
@@ -82,27 +83,30 @@ export function generateUserColor(userId) {
 }
 
 /**
- * Socket.IO Handlers for Real-Time Collaboration & Yjs CRDT
+ * Socket.IO Handler for Yjs CRDT Collaboration, Project Rooms, Presence, and Chat
  */
-export const setupYjsHandlers = (io) => {
-  // Socket.IO middleware for authentication
+export default function setupYjsHandlers(io) {
+  // Authentication middleware
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth?.token;
+      const token = socket.handshake.auth?.token || socket.handshake.query?.token;
       
       if (!token) {
         return next(new Error('Authentication token required'));
       }
 
       const decoded = verifyToken(token);
+      if (!decoded) {
+        return next(new Error('Invalid token'));
+      }
+
       socket.userId = decoded.id;
+      socket.username = decoded.username || 'Anonymous';
       socket.userEmail = decoded.email;
-      socket.username = decoded.username;
-      
       next();
     } catch (error) {
-      console.error('❌ Token verification failed in socket:', error.message);
-      next(new Error('Invalid authentication token'));
+      console.error('Socket auth error:', error.message);
+      next(new Error('Authentication failed'));
     }
   });
 
@@ -124,6 +128,19 @@ export const setupYjsHandlers = (io) => {
         socket.join(projectRoom);
         socket.currentProjects.add(projectId);
 
+        // Watch the workspace while anyone is in it
+        startWatching(io, projectId);
+
+        // Log activity and broadcast in real-time
+        await logAndBroadcastActivity(io, {
+          projectId,
+          userId: socket.userId,
+          type: 'user_joined',
+          action: `${socket.username} joined the project`,
+          metadata: {}
+        });
+
+        // Broadcast user joined
         socket.to(projectRoom).emit('user-joined', {
           userId: socket.userId,
           username: socket.username,
@@ -146,6 +163,7 @@ export const setupYjsHandlers = (io) => {
         const projectRoom = `project:${projectId}`;
         socket.leave(projectRoom);
         socket.currentProjects.delete(projectId);
+        stopWatching(projectId);
 
         socket.to(projectRoom).emit('user-left', {
           userId: socket.userId,
@@ -251,9 +269,9 @@ export const setupYjsHandlers = (io) => {
     });
 
     /**
-     * Yjs CRDT: Awareness (Remote cursors, selections, nametags)
+     * Yjs CRDT: Awareness (Cursor & Selection sync)
      */
-    socket.on('yjs:awareness', async ({ projectId, filePath, update }) => {
+    socket.on('yjs:awareness', ({ projectId, filePath, update }) => {
       try {
         if (!projectId || !filePath || !update) return;
 
@@ -265,7 +283,7 @@ export const setupYjsHandlers = (io) => {
           const uint8 = update instanceof Uint8Array ? update : new Uint8Array(update);
           awarenessProtocol.applyAwarenessUpdate(awareness, uint8, socket);
           
-          // Broadcast awareness update to other peers in this file room
+          // Relay awareness update to other peers in this file room
           socket.to(fileRoom).emit('yjs:awareness', {
             projectId,
             filePath,
@@ -282,71 +300,66 @@ export const setupYjsHandlers = (io) => {
      */
     socket.on('yjs:leave-file', ({ projectId, filePath }) => {
       try {
-        const pathStr = Array.isArray(filePath) ? filePath.join('/') : String(filePath || '');
+        if (!projectId || !filePath) return;
+        const pathStr = Array.isArray(filePath) ? filePath.join('/') : String(filePath);
         const fileRoom = `project:${projectId}:file:${pathStr}`;
+        
         socket.leave(fileRoom);
         socket.activeYjsRooms.delete(fileRoom);
+
+        // Check if any clients remain in this file room
+        const room = io.sockets.adapter.rooms.get(fileRoom);
+        if (!room || room.size === 0) {
+          yjsManager.closeDocument(projectId, filePath);
+        }
       } catch (error) {
         console.error('[Yjs] Error leaving file doc:', error);
       }
     });
 
     /**
-     * Real-time cursor coordinates (General presence)
+     * Project Chat: Message sending
      */
-    socket.on('cursor-update', ({ projectId, fileId, position, userId, username, color }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('cursor-update', {
-        fileId,
-        position,
-        userId: userId || socket.userId,
-        username: username || socket.username,
-        color: color || generateUserColor(socket.userId),
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    /**
-     * Project Real-Time Chat
-     */
-    socket.on('chat-message', async ({ projectId, message }, callback) => {
+    socket.on('chat-message', async (data, callback) => {
       try {
+        const { projectId, message } = data;
+        
         if (!projectId || !message?.trim()) {
-          if (callback) callback({ success: false, message: 'Invalid message data' });
+          if (callback) callback({ success: false, message: 'Project ID and message are required' });
           return;
         }
 
-        const projectRoom = `project:${projectId}`;
-        
-        const newMessage = await Message.create({
+        // Save message to MongoDB
+        const newMessage = new Message({
           projectId,
-          senderId: socket.userId,
-          content: message.trim(),
-          type: 'text'
-        });
-
-        await newMessage.populate('senderId', 'username email avatar');
-
-        const messageData = {
-          _id: newMessage._id,
           userId: socket.userId,
           username: socket.username,
-          avatar: newMessage.senderId?.avatar,
-          message: newMessage.content,
-          timestamp: newMessage.createdAt,
-          type: 'text'
+          message: message.trim(),
+          timestamp: new Date()
+        });
+
+        await newMessage.save();
+
+        const messageData = {
+          id: newMessage._id,
+          projectId,
+          userId: socket.userId,
+          username: socket.username,
+          message: message.trim(),
+          timestamp: newMessage.timestamp.toISOString()
         };
 
-        io.to(projectRoom).emit('chat-message', messageData);
+        // Broadcast to everyone in project room
+        io.to(`project:${projectId}`).emit('chat-message', messageData);
 
+        // Log activity
         await logAndBroadcastActivity(io, {
           projectId,
           userId: socket.userId,
           type: 'chat_message',
           action: `${socket.username} sent a message`,
           metadata: {
-            messageId: newMessage._id,
-            preview: message.trim().substring(0, 50)
+            message: message.trim()
           }
         });
 
@@ -358,11 +371,11 @@ export const setupYjsHandlers = (io) => {
     });
 
     /**
-     * Typing indicators
+     * Typing indicator
      */
-    socket.on('typing', ({ projectId, isTyping }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('user-typing', {
+    socket.on('user-typing', ({ projectId, isTyping }) => {
+      if (!projectId) return;
+      socket.to(`project:${projectId}`).emit('user-typing', {
         userId: socket.userId,
         username: socket.username,
         isTyping
@@ -370,127 +383,33 @@ export const setupYjsHandlers = (io) => {
     });
 
     /**
-     * Unified Filesystem Real-Time Broadcasts
-     */
-    socket.on('filesystem:create', async ({ projectId, item }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('filesystem:created', { item });
-
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: `${item?.type || 'file'}_created`,
-        action: `${socket.username} created ${item?.type || 'file'} ${item?.name || 'new item'}`,
-        metadata: { fileName: item?.name, path: item?.path }
-      });
-    });
-
-    socket.on('filesystem:rename', async ({ projectId, oldPath, newPath, newName }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('filesystem:renamed', { oldPath, newPath, newName });
-
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: 'file_renamed',
-        action: `${socket.username} renamed to ${newName}`,
-        metadata: { oldPath, newPath, newName }
-      });
-    });
-
-    socket.on('filesystem:delete', async ({ projectId, path, deletedNode }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('filesystem:deleted', { path });
-
-      await logAndBroadcastActivity(io, {
-        projectId,
-        userId: socket.userId,
-        type: `${deletedNode?.type || 'file'}_deleted`,
-        action: `${socket.username} deleted ${deletedNode?.type || 'file'} ${deletedNode?.name || 'an item'}`,
-        metadata: { fileName: deletedNode?.name, nodeId: deletedNode?.id }
-      });
-    });
-
-    socket.on('filesystem:file-updated', ({ projectId, path, content }) => {
-      const projectRoom = `project:${projectId}`;
-      socket.to(projectRoom).emit('filesystem:file-updated', {
-        path,
-        content,
-        userId: socket.userId,
-        username: socket.username,
-        timestamp: new Date().toISOString()
-      });
-    });
-
-    /**
-     * WebRTC Signaling
-     */
-    socket.on('webrtc:call-started', ({ projectId }) => {
-      socket.to(`project:${projectId}`).emit('webrtc:call-started', {
-        from: socket.userId,
-        username: socket.username
-      });
-    });
-
-    socket.on('webrtc:offer', ({ to, offer }) => {
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:offer', {
-          from: socket.userId,
-          offer,
-          username: socket.username
-        });
-      }
-    });
-
-    socket.on('webrtc:answer', ({ to, answer }) => {
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:answer', {
-          from: socket.userId,
-          answer
-        });
-      }
-    });
-
-    socket.on('webrtc:ice-candidate', ({ to, candidate }) => {
-      const sockets = Array.from(io.sockets.sockets.values());
-      const target = sockets.find(s => s.userId === to);
-      if (target) {
-        target.emit('webrtc:ice-candidate', {
-          from: socket.userId,
-          candidate
-        });
-      }
-    });
-
-    socket.on('webrtc:end-call', ({ projectId, userId, username }) => {
-      socket.to(`project:${projectId}`).emit('webrtc:call-ended', {
-        userId: userId || socket.userId,
-        username: username || socket.username
-      });
-    });
-
-    /**
-     * Socket Disconnect
+     * Disconnection handling
      */
     socket.on('disconnect', () => {
       console.log(`❌ User disconnected: ${socket.username} (${socket.userId})`);
-      
-      for (const projectId of socket.currentProjects) {
+
+      // Leave project rooms
+      socket.currentProjects.forEach(projectId => {
+        stopWatching(projectId);
         socket.to(`project:${projectId}`).emit('user-left', {
           userId: socket.userId,
           username: socket.username,
           socketId: socket.id
         });
-      }
+      });
 
-      socket.currentProjects.clear();
-      socket.activeYjsRooms.clear();
+      // Clean up empty Yjs file rooms
+      socket.activeYjsRooms.forEach(fileRoom => {
+        const room = io.sockets.adapter.rooms.get(fileRoom);
+        if (!room || room.size === 0) {
+          const parts = fileRoom.split(':file:');
+          if (parts.length === 2) {
+            const projectId = parts[0].replace('project:', '');
+            const filePath = parts[1];
+            yjsManager.closeDocument(projectId, filePath);
+          }
+        }
+      });
     });
   });
-};
-
-export default setupYjsHandlers;
+}

@@ -3,7 +3,8 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import { loadStructure, saveStructure, findNodeByPath } from '../controllers/FileSystemController.js';
+import fs from 'fs/promises';
+import { resolveProjectPath, syncMongoFile } from '../controllers/FileSystemController.js';
 
 /**
  * Normalizes project ID and file path into a single document key
@@ -14,12 +15,12 @@ export const normalizeKey = (projectId, filePath) => {
 };
 
 /**
- * Normalizes file path into array format for filesystem tree search
+ * Normalizes file path into array format for filesystem resolution
  */
 export const normalizePathArray = (filePath) => {
-  if (Array.isArray(filePath)) return filePath;
+  if (Array.isArray(filePath)) return filePath.filter((p) => p !== 'root');
   if (!filePath) return [];
-  return String(filePath).split('/').filter(Boolean);
+  return String(filePath).split('/').filter(Boolean).filter((p) => p !== 'root');
 };
 
 /**
@@ -80,20 +81,21 @@ class YjsDocumentManager {
   }
 
   /**
-   * Load document content from unified JSON filesystem
+   * Load document content from disk filesystem
    */
   async loadDocumentFromFilesystem(ydoc, projectId, filePath, fallbackContent = null) {
     try {
-      const structure = await loadStructure(projectId);
       const pathArray = normalizePathArray(filePath);
-      const fileNode = findNodeByPath(structure, pathArray);
-      
-      const content = fileNode?.content !== undefined 
-        ? fileNode.content 
-        : (fallbackContent || '');
+      const { target } = resolveProjectPath(projectId, pathArray);
+      let content = fallbackContent;
+      try {
+        content = await fs.readFile(target, 'utf-8');
+      } catch {
+        content = fallbackContent || '';
+      }
 
-      this.initializeFromContent(ydoc, content);
-      console.log(`✅ Loaded Yjs doc for ${projectId}:${Array.isArray(filePath) ? filePath.join('/') : filePath}`);
+      this.initializeFromContent(ydoc, content || '');
+      console.log(`✅ Loaded Yjs doc for ${projectId}:${pathArray.join('/')}`);
     } catch (error) {
       console.error(`Error loading Yjs doc for ${projectId}:`, error);
       this.initializeFromContent(ydoc, fallbackContent || '');
@@ -159,23 +161,19 @@ class YjsDocumentManager {
   }
 
   /**
-   * Save current document content to unified filesystem disk
+   * Save current document content to disk filesystem and sync MongoDB
    */
   async saveDocumentToFilesystem(projectId, filePath, ydoc) {
     try {
       const ytext = ydoc.getText('monaco');
       const content = ytext.toString();
-
-      const structure = await loadStructure(projectId);
       const pathArray = normalizePathArray(filePath);
-      const fileNode = findNodeByPath(structure, pathArray);
+      const { target } = resolveProjectPath(projectId, pathArray);
 
-      if (fileNode && fileNode.type === 'file') {
-        fileNode.content = content;
-        fileNode.updatedAt = new Date().toISOString();
-        await saveStructure(projectId, structure);
-        console.log(`💾 Auto-saved collaborative changes to ${projectId}:${pathArray.join('/')}`);
-      }
+      await fs.writeFile(target, content, 'utf-8');
+      const fileName = pathArray[pathArray.length - 1] || 'file';
+      await syncMongoFile(projectId, pathArray, fileName, content, null);
+      console.log(`💾 Auto-saved collaborative changes to ${projectId}:${pathArray.join('/')}`);
     } catch (error) {
       console.error('Error saving collaborative document:', error);
     }

@@ -43,8 +43,11 @@ apiClient.interceptors.response.use(
       console.error('API Error:', error.message);
     }
 
-    if (error.response?.status === 401) {
-      // Unauthorized - Clear token and redirect to login
+    // A 401 from an expired session must bounce the user to /login. A 401 from the login or
+    // signup call itself is just "wrong credentials" - reloading there would wipe the form and
+    // kill the error toast before it renders, so let the caller handle those.
+    const isAuthAttempt = /\/auth\/(login|register|signup)$/.test(error.config?.url || '');
+    if (error.response?.status === 401 && !isAuthAttempt) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';

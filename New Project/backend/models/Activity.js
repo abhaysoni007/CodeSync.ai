@@ -21,6 +21,8 @@ const activitySchema = new mongoose.Schema({
       'file_edited',
       'file_deleted',
       'file_renamed',
+      'folder_created',
+      'folder_deleted',
       'chat_message',
       'project_created',
       'project_updated',

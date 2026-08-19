@@ -33,11 +33,11 @@
 
 @layer base {
   * {
-    @apply border-vscode-border;
+    @apply border-border outline-ring/50;
   }
 
   body {
-    @apply bg-vscode-bg text-vscode-text font-sans;
+    @apply font-sans bg-background text-foreground;
     margin: 0;
     padding: 0;
   }
@@ -49,6 +49,7 @@
   /* Smooth Scrolling */
   html {
     scroll-behavior: smooth;
+    @apply font-sans;
   }
 
   /* Scrollbar Styling */
@@ -66,6 +67,37 @@
 
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-vscode-accent/50;
+  }
+  /* shadcn/ui semantic tokens, mapped to the land-* (Cursor-IDE-inspired) palette.
+     App is dark-first (body already forces vscode-bg unconditionally), so these are
+     set once rather than duplicated across :root/.dark. */
+  /* RGB channel triples (not hex) so Tailwind's opacity modifiers (bg-primary/10, etc.)
+     can compose them via rgb(var(--x) / <alpha-value>) — see tailwind.config.js. */
+  :root {
+    --background: 10 10 11;
+    --foreground: 237 237 239;
+    --card: 19 19 21;
+    --card-foreground: 237 237 239;
+    --popover: 19 19 21;
+    --popover-foreground: 237 237 239;
+    --primary: 124 124 255;
+    --primary-foreground: 245 245 247;
+    --secondary: 25 26 29;
+    --secondary-foreground: 237 237 239;
+    --muted: 19 19 21;
+    --muted-foreground: 138 138 143;
+    --accent: 25 26 29;
+    --accent-foreground: 237 237 239;
+    --destructive: 248 113 113;
+    --destructive-foreground: 245 245 247;
+    --border: 35 35 38;
+    --input: 35 35 38;
+    --ring: 124 124 255;
+    --radius: 0.5rem;
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
   }
 }
 

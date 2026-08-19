@@ -20,6 +20,7 @@ import callRoutes from './routes/calls.js';
 import aiRoutes from './routes/ai.js';
 import filesystemRoutes from './routes/filesystem.js';
 import terminalRoutes from './routes/terminal.js';
+import previewRoutes from './routes/preview.js';
 
 // Import socket handlers
 import setupYjsHandlers from './services/SocketHandlers.js';
@@ -64,6 +65,12 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(cookieParser());
+
+// Live preview of a project's own HTML/CSS/JS. Mounted BEFORE helmet on purpose: helmet's default
+// Content-Security-Policy blocks inline <script> and <style>, which is most of what a user writes
+// in a hand-made index.html. Preview serves user content and carries no API surface of its own.
+app.use('/preview', previewRoutes);
 
 // ✅ Security
 app.use(
@@ -71,7 +78,6 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
-app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
