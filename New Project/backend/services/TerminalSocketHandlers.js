@@ -41,11 +41,13 @@ const canUseProject = async (projectId, userId) => {
 const shellFor = (requested) => {
   if (os.platform() === 'win32') {
     if (requested === 'cmd') return { file: 'cmd.exe', args: [] };
-    if (requested === 'bash') return { file: 'bash.exe', args: ['-l'] };
+    if (requested === 'bash') return { file: 'bash.exe', args: [] };
     return { file: 'powershell.exe', args: ['-NoLogo'] };
   }
   const file = process.env.SHELL || (os.platform() === 'darwin' ? '/bin/zsh' : '/bin/bash');
-  return { file, args: ['-l'] };
+  // Non-login: a login shell sources .bash_profile, which on some base images (e.g. Render's)
+  // cd's to $HOME and silently overrides the cwd we just set to the project directory.
+  return { file, args: [] };
 };
 
 const countSessions = (socketId) => {
