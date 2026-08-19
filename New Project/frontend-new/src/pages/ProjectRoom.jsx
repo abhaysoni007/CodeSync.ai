@@ -9,6 +9,7 @@ import Editor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import ProjectTimeline from '../components/ProjectTimeline';
+import VersionHistoryPanel from '../components/VersionHistoryPanel';
 import FileExplorer from '../components/FileExplorer';
 import ActivityBar from '../components/ActivityBar';
 import ExtensionsPanel from '../components/ExtensionsPanel';
@@ -289,6 +290,19 @@ const ProjectRoom = () => {
     socketRef.current.on('users-online', (users) => {
       console.log('Online users:', users);
       setOnlineUsers(users);
+    });
+
+    socketRef.current.on('version:created', (data) => {
+      console.log('Realtime version event:', data);
+      toast.success(`Version v${data.versionNumber} ${data.action === 'restore' ? 'restored' : 'saved'}`);
+      if (data.action === 'restore' && data.content !== undefined) {
+        if (activeFile && (data.fileId === activeFile._id || data.fileId === activeFile.mongoFileId)) {
+          setCode(data.content);
+          if (editorRef.current) {
+            editorRef.current.setValue(data.content);
+          }
+        }
+      }
     });
 
     // File create/delete/rename are handled by the FileExplorer via the filesystem:* events
@@ -633,7 +647,8 @@ const ProjectRoom = () => {
     try {
       const res = await fileAPI.getFileContent(id, path);
       const content = res?.success ? res.data?.content ?? '' : '';
-      patchTab(key, { content, saved: content, loading: false });
+      const mongoFileId = res?.data?.mongoFileId || res?.data?.fileId || null;
+      patchTab(key, { content, saved: content, loading: false, mongoFileId, _id: mongoFileId });
     } catch (error) {
       console.error('Failed to load file content:', error);
       toast.error(error.response?.data?.message || `Could not open ${node.name}`);
@@ -1308,6 +1323,44 @@ const ProjectRoom = () => {
 
       </div>
 
+      {/* Activity Timeline Panel */}
+      {showActivityPanel && (
+        <aside className="w-96 bg-vscode-panel border-l border-vscode-border flex flex-col">
+          {/* Activity Panel Header */}
+          <div className="p-4 border-b border-vscode-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-vscode-accent" />
+              <h2 className="font-semibold text-white">Activity Timeline</h2>
+            </div>
+            <button
+              onClick={() => setShowActivityPanel(false)}
+              className="p-1 hover:bg-vscode-bg rounded transition-colors"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Timeline Content */}
+          <div className="flex-1 overflow-y-auto">
+            <ProjectTimeline projectId={id} socket={socket} />
+          </div>
+        </aside>
+      )}
+
+      {/* Version History Panel */}
+      {showVersionHistory && (
+        <VersionHistoryPanel
+          activeFile={activeTab}
+          projectId={id}
+          currentCode={activeTab?.content || ''}
+          onClose={() => setShowVersionHistory(false)}
+          onVersionRestored={(restoredCode) => {
+            if (activeTab) {
+              patchTab(activeTab.key, { content: restoredCode });
+            }
+          }}
+        />
+      )}
       {/* Terminal Panel */}
       <TerminalPanel
         socket={socket}

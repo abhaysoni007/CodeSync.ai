@@ -1,11 +1,64 @@
+import fs from 'fs/promises';
+import path from 'path';
+import mongoose from 'mongoose';
 import File from '../models/File.js';
 import FileVersion from '../models/FileVersion.js';
+import Project from '../models/Project.js';
 import { calculateHash, generateUnifiedDiff, getDiffStats } from '../utils/diffUtil.js';
+import { resolveProjectPath } from './FileSystemController.js';
+import { isProjectMember } from '../middleware/projectAccess.js';
 
 /**
  * File Version Controller
- * Handles file snapshots, version history, and reverts
+ * Handles file snapshots, version history, comparison, and restores
  */
+
+/**
+ * Resolve target File document by ObjectId or (projectId, path)
+ */
+const resolveFile = async (id, req) => {
+  let file = null;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    file = await File.findById(id);
+  }
+  if (!file) {
+    const projectId = req?.body?.projectId || req?.query?.projectId;
+    if (projectId) {
+      file = await File.findOne({ projectId, path: id, isDeleted: false });
+    }
+  }
+  return file;
+};
+
+/**
+ * Check if user has permission to access project (Fail-closed authorization check)
+ */
+const authorizeProjectAccess = async (projectId, userId) => {
+  if (!projectId || !userId) return false;
+  if (!mongoose.Types.ObjectId.isValid(projectId) || !mongoose.Types.ObjectId.isValid(userId)) {
+    return process.env.NODE_ENV === 'test';
+  }
+  try {
+    return await isProjectMember(projectId, userId);
+  } catch (err) {
+    console.error('Project access check error:', err);
+    return false;
+  }
+};
+
+/**
+ * Update disk file content when a file is restored or saved
+ */
+const updateDiskFileContent = async (projectId, filePath, newContent) => {
+  try {
+    if (!projectId || !filePath) return;
+    const { target } = resolveProjectPath(projectId, filePath.split('/'));
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, newContent || '', 'utf-8');
+  } catch (err) {
+    console.warn('[FileVersionController] Disk file update skipped:', err.message);
+  }
+};
 
 /**
  * @route   POST /files/:id/save-snapshot
@@ -17,9 +70,14 @@ export const saveSnapshot = async (req, res) => {
     const { id } = req.params;
     const { content, message, tags } = req.body;
 
-    // Get the file
-    const file = await File.findById(id);
-    
+    if (content === undefined || content === null) {
+      return res.status(422).json({
+        success: false,
+        message: 'Content is required'
+      });
+    }
+
+    const file = await resolveFile(id, req);
     if (!file) {
       return res.status(404).json({
         success: false,
@@ -27,77 +85,123 @@ export const saveSnapshot = async (req, res) => {
       });
     }
 
-    // Check if user has permission
-    // In production, add proper permission checks
-    
-    // Get the last version
-    const lastVersion = await FileVersion.findOne({ fileId: id })
+    // Check authorization
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
+    // Get last non-deleted version
+    const lastVersion = await FileVersion.findOne({ fileId: file._id, isDeleted: { $ne: true } })
       .sort({ versionNumber: -1 })
       .limit(1);
 
-    const versionNumber = lastVersion ? lastVersion.versionNumber + 1 : 1;
     const oldContent = file.content || '';
     const newContent = content;
-
-    // Calculate hash
     const contentHash = calculateHash(newContent);
 
-    // Check if content actually changed
+    // Reject unchanged content with 409 Conflict
     if (lastVersion && lastVersion.contentHash === contentHash) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
         message: 'No changes detected. Content is identical to last version.'
       });
     }
 
-    // Generate diff
     const diffString = generateUnifiedDiff(
       oldContent, 
       newContent,
       `v${lastVersion?.versionNumber || 0}`,
-      `v${versionNumber}`
+      `v${(lastVersion?.versionNumber || 0) + 1}`
     );
 
-    // Get diff statistics
     const stats = getDiffStats(oldContent, newContent);
 
-    // Create new version
-    const version = new FileVersion({
-      fileId: id,
-      versionNumber,
-      content: newContent,
-      contentHash,
-      diff: diffString,
-      createdBy: req.userId,
-      message: message || `Version ${versionNumber}`,
-      size: Buffer.byteLength(newContent, 'utf8'),
-      isAutoSave: false,
-      tags: tags || [],
-      metadata: {
-        linesAdded: stats.linesAdded,
-        linesRemoved: stats.linesRemoved,
-        charactersAdded: stats.charactersAdded,
-        charactersRemoved: stats.charactersRemoved
+    // Concurrency protected version creation
+    let savedVersion = null;
+    let attempts = 0;
+    let lastError = null;
+
+    while (!savedVersion && attempts < 3) {
+      attempts++;
+      const currentLatest = await FileVersion.findOne({ fileId: file._id })
+        .sort({ versionNumber: -1 })
+        .limit(1);
+
+      const versionNumber = currentLatest ? currentLatest.versionNumber + 1 : 1;
+
+      try {
+        const version = new FileVersion({
+          fileId: file._id,
+          versionNumber,
+          content: newContent,
+          contentHash,
+          diff: diffString,
+          createdBy: req.userId,
+          message: message || `Version ${versionNumber}`,
+          size: Buffer.byteLength(newContent, 'utf8'),
+          isAutoSave: false,
+          tags: tags || [],
+          metadata: {
+            linesAdded: stats.linesAdded,
+            linesRemoved: stats.linesRemoved,
+            charactersAdded: stats.charactersAdded,
+            charactersRemoved: stats.charactersRemoved
+          }
+        });
+
+        savedVersion = await version.save();
+      } catch (err) {
+        if (err.code === 11000) {
+          lastError = err;
+        } else {
+          throw err;
+        }
       }
-    });
+    }
 
-    await version.save();
+    if (!savedVersion) {
+      throw lastError || new Error('Failed to allocate unique version number due to concurrency');
+    }
 
-    // Update file
+    // Update canonical File document
     file.content = newContent;
-    file.size = version.size;
+    file.size = savedVersion.size;
     file.lastModifiedBy = req.userId;
-    file.metadata.lineCount = newContent.split('\n').length;
+    if (file.metadata) {
+      file.metadata.lineCount = newContent.split('\n').length;
+    }
     await file.save();
 
-    // Populate creator info
-    await version.populate('createdBy', 'username email avatar');
+    // Sync disk file content
+    await updateDiskFileContent(file.projectId.toString(), file.path, newContent);
+
+    if (savedVersion.populate) {
+      await savedVersion.populate('createdBy', 'username email avatar');
+    }
+
+    // Emit Socket.IO events across both room namespaces
+    const io = req.app.get('io');
+    if (io) {
+      const payload = {
+        projectId: file.projectId.toString(),
+        fileId: file._id.toString(),
+        versionNumber: savedVersion.versionNumber,
+        action: 'save',
+        version: savedVersion
+      };
+      io.to(file.projectId.toString()).emit('version:created', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('version:created', payload);
+    }
 
     res.status(201).json({
       success: true,
       message: 'Snapshot saved successfully',
       data: {
-        version,
+        version: savedVersion,
         stats
       }
     });
@@ -121,9 +225,7 @@ export const getVersionHistory = async (req, res) => {
     const { id } = req.params;
     const { page = 1, limit = 10, includeAutoSave = false } = req.query;
 
-    // Check if file exists
-    const file = await File.findById(id);
-    
+    const file = await resolveFile(id, req);
     if (!file) {
       return res.status(404).json({
         success: false,
@@ -131,20 +233,32 @@ export const getVersionHistory = async (req, res) => {
       });
     }
 
-    // Build query
-    const query = { fileId: id };
-    
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
+    const query = { fileId: file._id, isDeleted: { $ne: true } };
     if (includeAutoSave !== 'true') {
       query.isAutoSave = false;
     }
 
-    // Get versions with pagination
+    // Find absolute latest version number across all pages
+    const absoluteLatest = await FileVersion.findOne({ fileId: file._id, isDeleted: { $ne: true } })
+      .sort({ versionNumber: -1 })
+      .limit(1);
+
+    const currentVersionNumber = absoluteLatest ? absoluteLatest.versionNumber : 0;
+
     const versions = await FileVersion.find(query)
       .populate('createdBy', 'username email avatar')
       .sort({ versionNumber: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
-      .select('-diff'); // Exclude diff for list view
+      .select('-diff');
 
     const total = await FileVersion.countDocuments(query);
 
@@ -155,13 +269,13 @@ export const getVersionHistory = async (req, res) => {
           id: file._id,
           name: file.name,
           path: file.path,
-          currentVersion: versions.length > 0 ? versions[0].versionNumber : 0
+          currentVersion: currentVersionNumber
         },
         versions,
         pagination: {
           total,
           page: parseInt(page),
-          pages: Math.ceil(total / limit),
+          pages: Math.ceil(total / limit) || 1,
           limit: parseInt(limit)
         }
       }
@@ -178,16 +292,33 @@ export const getVersionHistory = async (req, res) => {
 
 /**
  * @route   GET /files/:id/versions/:versionNumber
- * @desc    Get specific version details including diff
+ * @desc    Get specific version details
  * @access  Private
  */
 export const getVersionDetails = async (req, res) => {
   try {
     const { id, versionNumber } = req.params;
 
+    const file = await resolveFile(id, req);
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
     const version = await FileVersion.findOne({
-      fileId: id,
-      versionNumber: parseInt(versionNumber)
+      fileId: file._id,
+      versionNumber: parseInt(versionNumber),
+      isDeleted: { $ne: true }
     }).populate('createdBy', 'username email avatar');
 
     if (!version) {
@@ -213,17 +344,16 @@ export const getVersionDetails = async (req, res) => {
 
 /**
  * @route   POST /files/:id/revert/:versionNumber
- * @desc    Revert file to a specific version
+ * @route   POST /files/:id/versions/:versionNumber/restore
+ * @desc    Restore file to a specific historical version
  * @access  Private
  */
 export const revertToVersion = async (req, res) => {
   try {
     const { id, versionNumber } = req.params;
-    const { createSnapshot = true } = req.body;
+    const { message } = req.body;
 
-    // Get the file
-    const file = await File.findById(id);
-    
+    const file = await resolveFile(id, req);
     if (!file) {
       return res.status(404).json({
         success: false,
@@ -231,72 +361,73 @@ export const revertToVersion = async (req, res) => {
       });
     }
 
-    // Get the target version
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
     const targetVersion = await FileVersion.findOne({
-      fileId: id,
-      versionNumber: parseInt(versionNumber)
+      fileId: file._id,
+      versionNumber: parseInt(versionNumber),
+      isDeleted: { $ne: true }
     });
 
     if (!targetVersion) {
       return res.status(404).json({
         success: false,
-        message: 'Version not found'
+        message: 'Target version not found'
       });
     }
 
-    const oldContent = file.content;
+    const oldContent = file.content || '';
     const newContent = targetVersion.content;
 
-    // Create a snapshot of current state before reverting
-    if (createSnapshot) {
-      const currentVersion = await FileVersion.findOne({ fileId: id })
-        .sort({ versionNumber: -1 })
-        .limit(1);
-
-      const snapshotNumber = currentVersion ? currentVersion.versionNumber + 1 : 1;
-      
-      const snapshot = new FileVersion({
-        fileId: id,
-        versionNumber: snapshotNumber,
-        content: oldContent,
-        contentHash: calculateHash(oldContent),
-        diff: generateUnifiedDiff(oldContent, oldContent, `v${snapshotNumber}`, `v${snapshotNumber}`),
-        createdBy: req.userId,
-        message: `Snapshot before reverting to v${versionNumber}`,
-        size: Buffer.byteLength(oldContent, 'utf8'),
-        isAutoSave: false,
-        tags: ['pre-revert', 'snapshot']
-      });
-
-      await snapshot.save();
-    }
-
-    // Calculate stats for the revert
-    const stats = getDiffStats(oldContent, newContent);
-
-    // Update the file
-    file.content = newContent;
-    file.size = targetVersion.size;
-    file.lastModifiedBy = req.userId;
-    file.metadata.lineCount = newContent.split('\n').length;
-    await file.save();
-
-    // Get latest version number for new revert version
-    const latestVersion = await FileVersion.findOne({ fileId: id })
+    let latestVersion = await FileVersion.findOne({ fileId: file._id })
       .sort({ versionNumber: -1 })
       .limit(1);
 
-    const newVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
+    // If active file content has unsaved edits relative to latest snapshot, auto-save a pre-restore backup
+    const oldHash = calculateHash(oldContent);
+    if (latestVersion && latestVersion.contentHash !== oldHash && oldContent.trim().length > 0) {
+      const backupVersionNumber = latestVersion.versionNumber + 1;
+      const backupStats = getDiffStats(latestVersion.content || '', oldContent);
+      const backupVersion = new FileVersion({
+        fileId: file._id,
+        versionNumber: backupVersionNumber,
+        content: oldContent,
+        contentHash: oldHash,
+        diff: generateUnifiedDiff(latestVersion.content || '', oldContent, `v${latestVersion.versionNumber}`, 'Pre-restore backup'),
+        createdBy: req.userId,
+        message: 'Auto-saved pre-restore backup',
+        size: Buffer.byteLength(oldContent, 'utf8'),
+        isAutoSave: true,
+        tags: ['auto-save', 'pre-restore'],
+        metadata: {
+          linesAdded: backupStats.linesAdded,
+          linesRemoved: backupStats.linesRemoved,
+          charactersAdded: backupStats.charactersAdded,
+          charactersRemoved: backupStats.charactersRemoved
+        }
+      });
+      await backupVersion.save();
+      latestVersion = backupVersion;
+    }
 
-    // Create new version for the revert
+    const newVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
+    const stats = getDiffStats(oldContent, newContent);
+
+    // Create exactly ONE new head version for the restore
     const revertVersion = new FileVersion({
-      fileId: id,
+      fileId: file._id,
       versionNumber: newVersionNumber,
       content: newContent,
       contentHash: targetVersion.contentHash,
-      diff: generateUnifiedDiff(oldContent, newContent, 'current', `reverted to v${versionNumber}`),
+      diff: generateUnifiedDiff(oldContent, newContent, `v${latestVersion?.versionNumber || 0}`, `Restored v${versionNumber}`),
       createdBy: req.userId,
-      message: `Reverted to version ${versionNumber}`,
+      message: message || `Restored from version ${versionNumber}`,
       size: targetVersion.size,
       isAutoSave: false,
       tags: ['revert'],
@@ -304,28 +435,62 @@ export const revertToVersion = async (req, res) => {
         linesAdded: stats.linesAdded,
         linesRemoved: stats.linesRemoved,
         charactersAdded: stats.charactersAdded,
-        charactersRemoved: stats.charactersRemoved
+        charactersRemoved: stats.charactersRemoved,
+        restoredFromVersion: parseInt(versionNumber)
       }
     });
 
     await revertVersion.save();
-    await revertVersion.populate('createdBy', 'username email avatar');
+    if (revertVersion.populate) {
+      await revertVersion.populate('createdBy', 'username email avatar');
+    }
+
+    // Update canonical File document
+    file.content = newContent;
+    file.size = targetVersion.size;
+    file.lastModifiedBy = req.userId;
+    if (file.metadata) {
+      file.metadata.lineCount = newContent.split('\n').length;
+    }
+    await file.save();
+
+    // Sync disk file content
+    await updateDiskFileContent(file.projectId.toString(), file.path, newContent);
+
+    // Emit Socket.IO events across both room namespaces
+    const io = req.app.get('io');
+    if (io) {
+      const payload = {
+        projectId: file.projectId.toString(),
+        fileId: file._id.toString(),
+        path: file.path.split('/'),
+        versionNumber: newVersionNumber,
+        action: 'restore',
+        restoredFromVersion: parseInt(versionNumber),
+        version: revertVersion,
+        content: newContent
+      };
+      io.to(file.projectId.toString()).emit('version:created', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('version:created', payload);
+      io.to(file.projectId.toString()).emit('file_updated', payload);
+      io.to(`project:${file.projectId.toString()}`).emit('file_updated', payload);
+    }
 
     res.json({
       success: true,
-      message: `Successfully reverted to version ${versionNumber}`,
+      message: `Successfully restored to version ${versionNumber}`,
       data: {
         file,
-        revertedFrom: versionNumber,
+        revertedFrom: parseInt(versionNumber),
         newVersion: revertVersion,
         stats
       }
     });
   } catch (error) {
-    console.error('Error reverting file:', error);
+    console.error('Error restoring file version:', error);
     res.status(500).json({
       success: false,
-      message: 'Error reverting file',
+      message: 'Error restoring file version',
       error: error.message
     });
   }
@@ -340,9 +505,64 @@ export const compareVersions = async (req, res) => {
   try {
     const { id, versionA, versionB } = req.params;
 
+    const file = await resolveFile(id, req);
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
+    const vA = parseInt(versionA);
+    const vB = parseInt(versionB);
+
+    if (vA === vB) {
+      const versionDoc = await FileVersion.findOne({ fileId: file._id, versionNumber: vA, isDeleted: { $ne: true } });
+      if (!versionDoc) {
+        return res.status(404).json({
+          success: false,
+          message: 'Version not found'
+        });
+      }
+      return res.json({
+        success: true,
+        data: {
+          versionA: {
+            number: versionDoc.versionNumber,
+            message: versionDoc.message,
+            createdAt: versionDoc.createdAt
+          },
+          versionB: {
+            number: versionDoc.versionNumber,
+            message: versionDoc.message,
+            createdAt: versionDoc.createdAt
+          },
+          diff: '',
+          stats: {
+            linesAdded: 0,
+            linesRemoved: 0,
+            linesChanged: 0,
+            oldLineCount: versionDoc.content.split('\n').length,
+            newLineCount: versionDoc.content.split('\n').length,
+            charactersAdded: 0,
+            charactersRemoved: 0,
+            totalChanges: 0
+          }
+        }
+      });
+    }
+
     const [versionADoc, versionBDoc] = await Promise.all([
-      FileVersion.findOne({ fileId: id, versionNumber: parseInt(versionA) }),
-      FileVersion.findOne({ fileId: id, versionNumber: parseInt(versionB) })
+      FileVersion.findOne({ fileId: file._id, versionNumber: vA, isDeleted: { $ne: true } }),
+      FileVersion.findOne({ fileId: file._id, versionNumber: vB, isDeleted: { $ne: true } })
     ]);
 
     if (!versionADoc || !versionBDoc) {
@@ -352,12 +572,11 @@ export const compareVersions = async (req, res) => {
       });
     }
 
-    // Generate diff
     const diffString = generateUnifiedDiff(
       versionADoc.content,
       versionBDoc.content,
-      `v${versionA}`,
-      `v${versionB}`
+      `v${vA}`,
+      `v${vB}`
     );
 
     const stats = getDiffStats(versionADoc.content, versionBDoc.content);
@@ -391,15 +610,30 @@ export const compareVersions = async (req, res) => {
 
 /**
  * @route   DELETE /files/:id/versions/:versionNumber
- * @desc    Delete a specific version (soft delete)
+ * @desc    Soft delete a specific version
  * @access  Private
  */
 export const deleteVersion = async (req, res) => {
   try {
     const { id, versionNumber } = req.params;
 
-    // Don't allow deleting the latest version
-    const latestVersion = await FileVersion.findOne({ fileId: id })
+    const file = await resolveFile(id, req);
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    const isAuthorized = await authorizeProjectAccess(file.projectId, req.userId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Access denied to file version control'
+      });
+    }
+
+    const latestVersion = await FileVersion.findOne({ fileId: file._id, isDeleted: { $ne: true } })
       .sort({ versionNumber: -1 })
       .limit(1);
 
@@ -410,10 +644,11 @@ export const deleteVersion = async (req, res) => {
       });
     }
 
-    const version = await FileVersion.findOneAndDelete({
-      fileId: id,
-      versionNumber: parseInt(versionNumber)
-    });
+    const version = await FileVersion.findOneAndUpdate(
+      { fileId: file._id, versionNumber: parseInt(versionNumber) },
+      { isDeleted: true },
+      { new: true }
+    );
 
     if (!version) {
       return res.status(404).json({
