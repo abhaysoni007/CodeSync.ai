@@ -36,7 +36,8 @@ const activitySchema = new mongoose.Schema({
   },
   metadata: {
     fileName: String,
-    fileId: mongoose.Schema.Types.ObjectId,
+    fileId: mongoose.Schema.Types.Mixed,
+    filePath: String,
     oldName: String,
     newName: String,
     message: String,

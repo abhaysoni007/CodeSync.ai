@@ -1,26 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useAI } from '@/context/AIContext';
 import ChatMessage from './ChatMessage';
-import AgentLog from './AgentLog';
 import InputArea from './InputArea';
 import HistoryTab from './HistoryTab';
-import PermissionModal from './PermissionModal';
-import { FiX, FiMaximize2, FiMinimize2, FiTrash2, FiClock } from 'react-icons/fi';
+import { FiX, FiMaximize2, FiMinimize2, FiTrash2, FiClock, FiCpu } from 'react-icons/fi';
 import PropTypes from 'prop-types';
 
 const AIPanel = ({ onClose }) => {
   const {
-    mode,
     messages,
     isLoading,
-    agentLogs,
     history,
-    pendingPermissions,
-    setPendingPermissions,
     clearMessages,
-    askQuestion,
-    executeAgentTask
+    askQuestion
   } = useAI();
 
   const [input, setInput] = useState('');
@@ -31,7 +24,7 @@ const AIPanel = ({ onClose }) => {
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, agentLogs]);
+  }, [messages]);
 
   const handleSubmit = async () => {
     if (!input.trim() || isLoading) return;
@@ -40,11 +33,7 @@ const AIPanel = ({ onClose }) => {
     setInput('');
 
     try {
-      if (mode === 'ask') {
-        await askQuestion(userInput);
-      } else {
-        await executeAgentTask(userInput);
-      }
+      await askQuestion(userInput);
     } catch (error) {
       console.error('Submit error:', error);
     }
@@ -70,45 +59,52 @@ const AIPanel = ({ onClose }) => {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#292E38] bg-[#15181D]">
         <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <h2 className="text-lg font-semibold text-white">
-            AI Assistant {mode === 'agent' && '🤖'}
-          </h2>
+          <div className="p-1.5 rounded-lg bg-vscode-accent/10 border border-vscode-accent/20">
+            <FiCpu className="w-4 h-4 text-vscode-accent" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-white">
+              AI Code Assistant
+            </h2>
+            <p className="text-[11px] text-gray-400">Ask mode • Gemini AI</p>
+          </div>
           {isLoading && (
-            <span className="text-xs text-gray-400 animate-pulse">Processing...</span>
+            <span className="text-xs text-vscode-accent animate-pulse ml-2">Thinking...</span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowHistory(!showHistory)}
-            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
-            title="History"
+            className="p-2 hover:bg-[#1C2027] rounded text-gray-400 hover:text-white transition-colors"
+            title="Interaction History"
           >
-            <FiClock className="w-4 h-4 text-gray-400" />
+            <FiClock className="w-4 h-4" />
           </button>
           <button
             onClick={clearMessages}
-            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded text-gray-400 hover:text-red-400 transition-colors"
             title="Clear Chat"
           >
-            <FiTrash2 className="w-4 h-4 text-gray-400" />
+            <FiTrash2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setIsMaximized(!isMaximized)}
-            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded text-gray-400 hover:text-white transition-colors"
+            title={isMaximized ? "Restore Size" : "Maximize"}
           >
             {isMaximized ? (
-              <FiMinimize2 className="w-4 h-4 text-gray-400" />
+              <FiMinimize2 className="w-4 h-4" />
             ) : (
-              <FiMaximize2 className="w-4 h-4 text-gray-400" />
+              <FiMaximize2 className="w-4 h-4" />
             )}
           </button>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-[#1C2027] rounded transition-colors"
+            className="p-2 hover:bg-[#1C2027] rounded text-gray-400 hover:text-white transition-colors"
+            title="Close Panel"
           >
-            <FiX className="w-5 h-5 text-gray-400" />
+            <FiX className="w-5 h-5" />
           </button>
         </div>
       </div>
@@ -119,81 +115,53 @@ const AIPanel = ({ onClose }) => {
           <HistoryTab history={history} onClose={() => setShowHistory(false)} />
         ) : (
           <div className="p-4 space-y-4">
-            {messages.length === 0 && agentLogs.length === 0 ? (
+            {messages.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-6xl mb-4">
-                  {mode === 'ask' ? '💬' : '🤖'}
-                </div>
-                <h3 className="text-xl font-semibold text-white mb-2">
-                  {mode === 'ask' ? 'Ask Me Anything' : 'Agent Mode Active'}
+                <div className="text-5xl mb-4">💬</div>
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  Ask Me Anything
                 </h3>
-                <p className="text-gray-400 max-w-md mx-auto">
-                  {mode === 'ask'
-                    ? 'Ask questions about coding, get explanations, or request code examples.'
-                    : 'Give me commands to generate code, create files, or build components automatically.'}
+                <p className="text-sm text-gray-400 max-w-sm mx-auto mb-6">
+                  Ask questions about your code, debug issues, explore algorithms, or get code explanations with Gemini.
                 </p>
-                <div className="mt-6 text-left max-w-md mx-auto">
-                  <p className="text-sm text-gray-500 mb-2">Examples:</p>
-                  <div className="space-y-2">
-                    {mode === 'ask' ? (
-                      <>
-                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
-                          "How do I create a React hook?"
-                        </div>
-                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
-                          "Explain async/await in JavaScript"
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
-                          "Create a landing page with hero section"
-                        </div>
-                        <div className="bg-[#1C2027] p-2 rounded text-sm text-gray-300">
-                          "Generate a login form component"
-                        </div>
-                      </>
-                    )}
-                  </div>
+                <div className="text-left max-w-sm mx-auto space-y-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Try asking:</p>
+                  <button
+                    onClick={() => setInput('Explain how Yjs CRDT handles concurrent conflicts in real-time editors')}
+                    className="w-full text-left bg-[#1C2027] hover:bg-[#292E38] p-2.5 rounded-lg text-xs text-gray-300 transition-colors border border-[#292E38]"
+                  >
+                    💡 "Explain how Yjs CRDT handles concurrent conflicts"
+                  </button>
+                  <button
+                    onClick={() => setInput('Write an optimized binary search function in JavaScript with types')}
+                    className="w-full text-left bg-[#1C2027] hover:bg-[#292E38] p-2.5 rounded-lg text-xs text-gray-300 transition-colors border border-[#292E38]"
+                  >
+                    ⚡ "Write an optimized binary search function in JavaScript"
+                  </button>
+                  <button
+                    onClick={() => setInput('How do I manage state cleanly with React Context and useReducer?')}
+                    className="w-full text-left bg-[#1C2027] hover:bg-[#292E38] p-2.5 rounded-lg text-xs text-gray-300 transition-colors border border-[#292E38]"
+                  >
+                    🛠️ "How do I manage state cleanly with React Context?"
+                  </button>
                 </div>
               </div>
             ) : (
               <>
-                {/* Messages for Ask Mode */}
-                {mode === 'ask' &&
-                  messages.map((message) => (
-                    <ChatMessage key={message.id} message={message} />
-                  ))}
-
-                {/* Logs for Agent Mode */}
-                {mode === 'agent' && (
-                  <>
-                    {messages.map((message) => (
-                      <ChatMessage key={message.id} message={message} />
-                    ))}
-                    {agentLogs.length > 0 && (
-                      <div className="mt-4 space-y-2">
-                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                          Agent Logs
-                        </h4>
-                        {agentLogs.map((log, index) => (
-                          <AgentLog key={index} log={log} />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
+                {messages.map((message) => (
+                  <ChatMessage key={message.id} message={message} />
+                ))}
 
                 {/* Loading Indicator */}
                 {isLoading && (
-                  <div className="flex items-center gap-2 text-gray-400">
+                  <div className="flex items-center gap-2 text-gray-400 bg-[#1C2027] p-3 rounded-lg border border-[#292E38]">
                     <div className="flex gap-1">
                       <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <span className="w-2 h-2 bg-vscode-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
-                    <span className="text-sm">
-                      {mode === 'ask' ? 'Thinking...' : 'Agent working...'}
+                    <span className="text-xs text-vscode-accent font-medium">
+                      Gemini is generating response...
                     </span>
                   </div>
                 )}
@@ -214,16 +182,6 @@ const AIPanel = ({ onClose }) => {
           isLoading={isLoading}
         />
       )}
-
-      {/* Permission Modal */}
-      <AnimatePresence>
-        {pendingPermissions && pendingPermissions.length > 0 && (
-          <PermissionModal
-            permissions={pendingPermissions}
-            onComplete={() => setPendingPermissions([])}
-          />
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 };

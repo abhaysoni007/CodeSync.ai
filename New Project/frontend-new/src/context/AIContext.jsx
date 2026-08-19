@@ -14,20 +14,11 @@ export const useAI = () => {
 };
 
 export const AIProvider = ({ children }) => {
-  const [mode, setMode] = useState('ask'); // 'ask' or 'agent'
   const [model, setModel] = useState('gemini-2.0-flash-exp'); // Gemini model selection
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [agentLogs, setAgentLogs] = useState([]);
   const [history, setHistory] = useState([]);
-  const [pendingPermissions, setPendingPermissions] = useState([]);
-
-  // Switch between Ask and Agent modes
-  const switchMode = useCallback((newMode) => {
-    setMode(newMode);
-    toast.success(`Switched to ${newMode === 'ask' ? 'Ask' : 'Agent'} Mode`);
-  }, []);
 
   // Switch Gemini Model
   const switchModel = useCallback((newModel) => {
@@ -36,7 +27,7 @@ export const AIProvider = ({ children }) => {
       'gemini-2.0-flash-exp': 'Gemini 2.0 Flash',
       'gemini-1.5-pro': 'Gemini 1.5 Pro'
     };
-    toast.success(`Switched to ${modelNames[newModel]}`);
+    toast.success(`Switched to ${modelNames[newModel] || newModel}`);
   }, []);
 
   // Add message to chat
@@ -110,111 +101,9 @@ export const AIProvider = ({ children }) => {
     }
   }, [addMessage, model]);
 
-  // Agent Mode - Code Generation & File Operations
-  const executeAgentTask = useCallback(async (command) => {
-    setIsLoading(true);
-    
-    // Add user command
-    addMessage({
-      role: 'user',
-      content: command,
-      timestamp: new Date().toISOString()
-    });
-
-    // Add initial log
-    setAgentLogs((prev) => [...prev, {
-      type: 'info',
-      message: `🤖 Agent processing: "${command}"`,
-      timestamp: new Date().toISOString()
-    }]);
-
-    try {
-      const response = await api.post('/ai/agent', {
-        command: command,
-        model: model
-      });
-
-      const result = response.data;
-
-      // Add agent logs
-      if (result.logs) {
-        result.logs.forEach(log => {
-          setAgentLogs((prev) => [...prev, {
-            type: log.type || 'info',
-            message: log.message,
-            timestamp: new Date().toISOString()
-          }]);
-        });
-      }
-
-      // Check for pending permissions
-      if (result.pendingPermissions && result.pendingPermissions.length > 0) {
-        setPendingPermissions(result.pendingPermissions);
-        
-        addMessage({
-          role: 'agent',
-          content: `✅ Files created! ${result.pendingPermissions.length} terminal command(s) need your approval.`,
-          timestamp: new Date().toISOString(),
-          metadata: {
-            filesCreated: result.filesCreated,
-            filesModified: result.filesModified,
-            filesDeleted: result.filesDeleted,
-            hasPendingPermissions: true
-          }
-        });
-      } else {
-        // No permissions needed, task complete
-        addMessage({
-          role: 'agent',
-          content: result.message || '✅ Task completed successfully!',
-          timestamp: new Date().toISOString(),
-          metadata: {
-            filesCreated: result.filesCreated,
-            filesModified: result.filesModified,
-            filesDeleted: result.filesDeleted
-          }
-        });
-      }
-
-      // Add to history
-      setHistory((prev) => [...prev, {
-        mode: 'agent',
-        command,
-        result: result.message,
-        files: result.filesCreated || [],
-        timestamp: new Date().toISOString()
-      }]);
-
-      toast.success(result.message || 'Task completed!');
-      return result;
-
-    } catch (error) {
-      console.error('Agent Mode Error:', error);
-      const errorMessage = error.response?.data?.message || 'Agent task failed';
-      
-      addMessage({
-        role: 'error',
-        content: `❌ Agent Error: ${errorMessage}`,
-        timestamp: new Date().toISOString()
-      });
-
-      setAgentLogs((prev) => [...prev, {
-        type: 'error',
-        message: `❌ ${errorMessage}`,
-        timestamp: new Date().toISOString()
-      }]);
-
-      toast.error(errorMessage);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [addMessage, model]);
-
   // Clear messages
   const clearMessages = useCallback(() => {
     setMessages([]);
-    setAgentLogs([]);
   }, []);
 
   // Toggle panel
@@ -223,9 +112,6 @@ export const AIProvider = ({ children }) => {
   }, []);
 
   const value = {
-    mode,
-    setMode,
-    switchMode,
     model,
     setModel,
     switchModel,
@@ -234,12 +120,8 @@ export const AIProvider = ({ children }) => {
     isLoading,
     isPanelOpen,
     togglePanel,
-    agentLogs,
     history,
-    pendingPermissions,
-    setPendingPermissions,
     askQuestion,
-    executeAgentTask,
     clearMessages
   };
 
