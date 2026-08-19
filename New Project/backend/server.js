@@ -119,7 +119,7 @@ app.use('/auth', authRoutes);
 app.use('/user', userRoutes);
 app.use('/projects', projectRoutes);
 app.use('/rooms', roomRoutes);
-app.use('/files', fileRoutes);
+app.use('/api/files', fileRoutes);
 app.use('/rooms', callRoutes);
 app.use('/ai', aiRoutes);
 app.use('/ai', agentRoutes);

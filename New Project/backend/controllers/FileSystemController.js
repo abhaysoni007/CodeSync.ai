@@ -1,17 +1,18 @@
 /**
  * Project filesystem.
- *
- * WHY THIS IS DISK-BACKED: the previous version kept the tree as one JSON blob in
- * uploads/file-structures/<id>.json and mirrored it *out* to disk so the terminal had something to
- * run. Nothing ever read back, so everything the shell produced - `npm install`, `mkdir`, build
- * output, a cloned repo - existed on disk but was invisible in the explorer, and a mirror refresh
- * could delete it. There is now exactly one source of truth: the real directory. The editor reads
- * and writes the same bytes the shell sees.
+ * Direct disk-backed filesystem controller with MongoDB File synchronization for version control.
  */
 
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import File from '../models/File.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /** Where a project's files live. This is also the terminal's cwd. */
 export const projectDiskDir = (projectId) => path.join(process.cwd(), 'projects', projectId);
@@ -19,39 +20,33 @@ export const projectDiskDir = (projectId) => path.join(process.cwd(), 'projects'
 // Project ids come from the URL. Anything but a Mongo-style id could walk out of projects/.
 const isSafeProjectId = (id) => typeof id === 'string' && /^[a-fA-F0-9]{24}$/.test(id);
 
-// Directories that are real but not worth walking: one npm install is 30k files and would make
-// every tree fetch enormous. They still appear in the tree (that is the whole point of the
-// rewrite), they are just not expanded.
-// ponytail: fixed skip list + entry cap. Swap for lazy per-folder loading if users need to browse
-// inside node_modules.
 const NO_DESCEND = new Set([
   'node_modules', '.git', '.venv', 'venv', '__pycache__', '.next', '.cache', 'dist', 'build',
 ]);
 const MAX_ENTRIES = 5000;
 
-/**
- * Resolve a client-supplied path (array of names, optionally led by 'root') to an absolute path
- * that is provably inside the project directory.
- */
-export const resolveProjectPath = (projectId, segments = []) => {
-  if (!isSafeProjectId(projectId)) throw new Error('Invalid project id');
-  const root = projectDiskDir(projectId);
-  const parts = (Array.isArray(segments) ? segments : [segments])
-    .filter((s) => s !== undefined && s !== null && s !== '')
-    .map(String);
-  if (parts[0] === 'root') parts.shift();
-  for (const part of parts) {
-    if (part === '.' || part === '..' || part.includes('/') || part.includes('\\')) {
-      throw new Error(`Illegal path segment: ${part}`);
-    }
-  }
-  const target = path.resolve(root, ...parts);
-  const rel = path.relative(root, target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Path escapes project');
-  return { root, target, parts };
-};
+// Maximum size we will return to Monaco (2 MB). Files larger than this would freeze the tab.
+const MAX_EDITABLE_BYTES = 2 * 1024 * 1024;
 
-const ensureDir = (dir) => fs.mkdir(dir, { recursive: true });
+// Extensions we treat as binary and refuse to open in Monaco.
+const BINARY_EXT = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
+  '.pdf', '.zip', '.tar', '.gz', '.7z', '.rar',
+  '.exe', '.dll', '.so', '.dylib',
+  '.mp3', '.wav', '.ogg', '.mp4', '.webm',
+  '.ttf', '.woff', '.woff2', '.eot',
+  '.pyc', '.class', '.o',
+]);
+
+const fail = (res, status, message) => res.status(status).json({ success: false, message });
+
+const ensureDir = async (dirPath) => {
+  try {
+    await fs.access(dirPath);
+  } catch {
+    await fs.mkdir(dirPath, { recursive: true });
+  }
+};
 
 /** A brand-new project should not open on an empty pane. */
 const SEED = {
@@ -99,7 +94,8 @@ const restoreLegacyProject = async (projectId, dir) => {
   }
 };
 
-const ensureProjectDir = async (projectId) => {
+export const ensureProjectDir = async (projectId) => {
+  if (!isSafeProjectId(projectId)) throw new Error('Invalid project ID');
   const dir = projectDiskDir(projectId);
   const fresh = !fsSync.existsSync(dir) || (await fs.readdir(dir)).length === 0;
   await ensureDir(dir);
@@ -118,154 +114,225 @@ const ensureProjectDir = async (projectId) => {
   return dir;
 };
 
-/**
- * Read the directory into the tree shape the explorer renders.
- *
- * `id` is the path relative to the project root ('src/index.js'), which makes it unique and
- * stable - the old random `name_timestamp_rand` ids changed on every recreation and could collide
- * between two folders holding the same name.
- */
-const readTree = async (absDir, relParts, counter) => {
-  let dirents = [];
+// Names come from the client, so names like '..' or 'foo/bar' must never escape the directory.
+const isSafeSegment = (name) =>
+  typeof name === 'string' &&
+  name.length > 0 &&
+  name !== '.' &&
+  name !== '..' &&
+  !name.includes('/') &&
+  !name.includes('\\');
+
+export const resolveProjectPath = (projectId, pathArray) => {
+  if (!isSafeProjectId(projectId)) throw new Error('Invalid project id');
+  const parts = (Array.isArray(pathArray) ? pathArray : []).filter((p) => p !== 'root');
+  for (const part of parts) {
+    if (!isSafeSegment(part)) throw new Error(`Illegal path segment: ${part}`);
+  }
+  const root = projectDiskDir(projectId);
+  const target = path.join(root, ...parts);
+  const rel = path.relative(root, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error('Illegal path segment: traversal');
+  }
+  return { target, parts, root };
+};
+
+const withPath = async (req, res, pathArray, fn) => {
   try {
-    dirents = await fs.readdir(absDir, { withFileTypes: true });
+    const { projectId } = req.params;
+    const resolved = resolveProjectPath(projectId, pathArray);
+    return await fn(resolved);
+  } catch (error) {
+    console.warn('[FileSystem] Path resolution failed:', error.message);
+    return fail(res, 400, error.message);
+  }
+};
+
+const broadcast = (req, event, data) => {
+  const io = req.app.get('io');
+  if (!io) return;
+  io.to(`project:${req.params.projectId}`).emit(event, {
+    projectId: req.params.projectId,
+    ...data,
+  });
+  io.to(req.params.projectId).emit(event, {
+    projectId: req.params.projectId,
+    ...data,
+  });
+};
+
+/**
+ * Sync file node with MongoDB File collection
+ */
+export const syncMongoFile = async (projectId, pathInput, name, content, userId) => {
+  try {
+    let pathString = '';
+    if (Array.isArray(pathInput)) {
+      const filtered = pathInput.filter(p => p !== 'root');
+      pathString = filtered.length > 0 ? filtered.join('/') : pathInput.join('/');
+    } else if (typeof pathInput === 'string') {
+      pathString = pathInput;
+    }
+    if (!pathString) return null;
+
+    let validProjectId = null;
+    if (mongoose.Types.ObjectId.isValid(projectId)) {
+      validProjectId = new mongoose.Types.ObjectId(projectId);
+    } else {
+      const hash = crypto.createHash('md5').update(String(projectId)).digest('hex').substring(0, 24);
+      validProjectId = new mongoose.Types.ObjectId(hash);
+    }
+
+    let validUserId = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      validUserId = new mongoose.Types.ObjectId(userId);
+    } else {
+      const hash = crypto.createHash('md5').update(userId ? String(userId) : 'system').digest('hex').substring(0, 24);
+      validUserId = new mongoose.Types.ObjectId(hash);
+    }
+
+    const fileName = name || pathString.split('/').pop() || 'untitled';
+
+    const mongoFile = await File.findOneAndUpdate(
+      { projectId: validProjectId, path: pathString },
+      {
+        name: fileName,
+        path: pathString,
+        projectId: validProjectId,
+        content: content || '',
+        createdBy: validUserId,
+        lastModifiedBy: validUserId,
+        isDeleted: false,
+        size: Buffer.byteLength(content || '', 'utf8')
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    return mongoFile;
+  } catch (err) {
+    console.error('Error syncing Mongo File:', err);
+    return null;
+  }
+};
+
+/**
+ * Helper to load default structure if directory is completely empty
+ */
+const writeDefaultProjectFiles = async (dir) => {
+  const src = path.join(dir, 'src');
+  await ensureDir(src);
+  const mainFile = path.join(src, 'index.js');
+  if (!fsSync.existsSync(mainFile)) {
+    await fs.writeFile(mainFile, '// Start coding here\nconsole.log("Hello World!");\n', 'utf-8');
+  }
+  const readme = path.join(dir, 'README.md');
+  if (!fsSync.existsSync(readme)) {
+    await fs.writeFile(readme, '# Welcome to your project\n\nStart building something amazing!\n', 'utf-8');
+  }
+};
+
+export const buildTree = async (dir, prefix = []) => {
+  let entries = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  const children = [];
-  for (const entry of dirents) {
-    if (counter.n >= MAX_ENTRIES) break;
-    counter.n += 1;
-    const rel = [...relParts, entry.name];
-    const id = rel.join('/');
+  entries.sort((a, b) => {
+    if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+  });
 
+  const children = [];
+  for (const entry of entries) {
+    const rel = [...prefix, entry.name];
+    const uniqueId = rel.join('/');
     if (entry.isDirectory()) {
-      const skip = NO_DESCEND.has(entry.name);
-      children.push({
-        id,
+      const node = {
+        id: uniqueId,
         name: entry.name,
         type: 'folder',
         path: rel,
-        truncated: skip,
-        children: skip ? [] : await readTree(path.join(absDir, entry.name), rel, counter),
+        children: NO_DESCEND.has(entry.name) ? [] : await buildTree(path.join(dir, entry.name), rel),
+      };
+      children.push(node);
+    } else {
+      children.push({
+        id: uniqueId,
+        name: entry.name,
+        type: 'file',
+        path: rel,
       });
-    } else if (entry.isFile()) {
-      let size = 0;
-      try {
-        size = (await fs.stat(path.join(absDir, entry.name))).size;
-      } catch {
-        /* raced with a delete; report it as empty rather than failing the whole tree */
-      }
-      children.push({ id, name: entry.name, type: 'file', path: rel, size });
     }
   }
-
-  children.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
   return children;
-};
-
-export const buildTree = async (projectId) => {
-  const dir = await ensureProjectDir(projectId);
-  return {
-    id: 'root',
-    name: 'root',
-    type: 'folder',
-    path: [],
-    children: await readTree(dir, [], { n: 0 }),
-  };
-};
-
-// Anything above this is not editor content; Monaco would choke and the socket payload would be
-// absurd. The client gets a clear reason instead of a truncated file it might save back.
-const MAX_EDITABLE_BYTES = 2 * 1024 * 1024;
-
-const BINARY_EXT = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.pdf', '.zip', '.gz', '.tar',
-  '.exe', '.dll', '.so', '.dylib', '.class', '.jar', '.woff', '.woff2', '.ttf', '.mp4', '.mp3',
-]);
-
-/**
- * Decode a file the editor is about to show.
- *
- * WHY not just utf-8: on Windows a redirect in the shell (`echo hi > notes.txt` in PowerShell)
- * writes UTF-16LE with a BOM, and a plain utf-8 read renders that as "h\0i\0" mojibake. Since the
- * terminal and the editor now share one directory, files the shell wrote have to open cleanly.
- */
-export const decodeText = (buffer) => {
-  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) return buffer.toString('utf16le', 2);
-  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) return buffer.swap16().toString('utf16le', 2);
-  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
-    return buffer.toString('utf-8', 3);
-  }
-  return buffer.toString('utf-8');
-};
-
-const fail = (res, status, message) => res.status(status).json({ success: false, message });
-
-/** Every handler funnels through this so a bad path is a 400, not a 500 stack trace. */
-const withPath = (req, res, segments, run) => {
-  let resolved;
-  try {
-    resolved = resolveProjectPath(req.params.projectId, segments);
-  } catch (error) {
-    fail(res, 400, error.message);
-    return null;
-  }
-  return run(resolved);
-};
-
-/**
- * Tell everyone in the room the tree moved, so open explorers refetch.
- * The room name must match the one SocketHandlers' `join-project` uses - a bare projectId reaches
- * nobody.
- */
-const broadcast = (req, event, payload) => {
-  const io = req.app.get('io');
-  if (io) {
-    io.to(`project:${req.params.projectId}`).emit(event, { projectId: req.params.projectId, ...payload });
-  }
 };
 
 /**
  * GET /api/filesystem/:projectId
+ * Get the tree for a project. Returns the legacy wrapper shape { id: 'root', name: 'root', type: 'folder', children: [...] }
  */
 export const getFileStructure = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    if (!isSafeProjectId(projectId)) return fail(res, 400, 'Invalid project id');
-    res.json({ success: true, data: await buildTree(projectId) });
+    const dir = await ensureProjectDir(req.params.projectId);
+    const top = await fs.readdir(dir).catch(() => []);
+    if (top.length === 0) {
+      await writeDefaultProjectFiles(dir);
+    }
+
+    const children = await buildTree(dir);
+    res.json({
+      success: true,
+      data: {
+        id: 'root',
+        name: 'root',
+        type: 'folder',
+        children,
+      },
+    });
   } catch (error) {
-    console.error('Get file structure error:', error);
+    console.error('Get structure error:', error);
     fail(res, 500, error.message);
   }
 };
 
 /**
- * POST /api/filesystem/:projectId/create   { name, type, parentPath, content }
+ * POST /api/filesystem/:projectId/create   { name, type, parentPath }
  */
 export const createFileOrFolder = async (req, res) => {
   const { name, type, parentPath = [], content = '' } = req.body;
-  if (!name || !['file', 'folder'].includes(type)) {
-    return fail(res, 400, 'name and type ("file" | "folder") are required');
-  }
+  if (!name || !type) return fail(res, 400, 'name and type are required');
+  if (!['file', 'folder'].includes(type)) return fail(res, 400, 'type must be "file" or "folder"');
+  if (!isSafeSegment(name)) return fail(res, 400, `Invalid name: "${name}"`);
 
-  return withPath(req, res, [...parentPath, name], async ({ target, parts }) => {
+  const parts = [...parentPath.filter((p) => p !== 'root'), name];
+
+  return withPath(req, res, parts, async ({ target, parts: relParts }) => {
     try {
-      await ensureProjectDir(req.params.projectId);
       if (fsSync.existsSync(target)) {
-        return fail(res, 409, `A file or folder named "${name}" already exists`);
+        return fail(res, 409, `A ${type} named "${name}" already exists there`);
       }
       await ensureDir(path.dirname(target));
-      if (type === 'folder') await ensureDir(target);
-      else await fs.writeFile(target, content, 'utf-8');
+      if (type === 'folder') {
+        await ensureDir(target);
+      } else {
+        await fs.writeFile(target, content ?? '', 'utf-8');
+        await syncMongoFile(req.params.projectId, relParts, name, content ?? '', req.userId);
+      }
 
-      const node = { id: parts.join('/'), name, type, path: parts, ...(type === 'folder' ? { children: [] } : { content }) };
-      broadcast(req, 'filesystem:changed', { reason: 'create', path: parts });
-      res.status(201).json({ success: true, message: `${type} created`, data: node });
+      broadcast(req, 'filesystem:changed', { reason: 'create', path: relParts, type });
+
+      res.status(201).json({
+        success: true,
+        message: `${type === 'folder' ? 'Folder' : 'File'} created`,
+        data: {
+          id: name,
+          name,
+          type,
+          ...(type === 'folder' ? { children: [] } : { content: content ?? '' }),
+        },
+      });
     } catch (error) {
       console.error('Create error:', error);
       fail(res, 500, error.message);
@@ -279,16 +346,25 @@ export const createFileOrFolder = async (req, res) => {
 export const renameFileOrFolder = async (req, res) => {
   const { path: nodePath, newName } = req.body;
   if (!nodePath?.length || !newName) return fail(res, 400, 'path and newName are required');
+  if (!isSafeSegment(newName)) return fail(res, 400, `Invalid name: "${newName}"`);
 
-  return withPath(req, res, nodePath, async ({ target, parts }) => {
-    const destParts = [...parts.slice(0, -1), newName];
+  return withPath(req, res, nodePath, async ({ target: source, parts, root }) => {
+    const parentParts = parts.slice(0, -1);
+    const destParts = [...parentParts, newName];
+
     return withPath(req, res, destParts, async ({ target: dest }) => {
       try {
-        if (!fsSync.existsSync(target)) return fail(res, 404, 'File or folder not found');
-        if (fsSync.existsSync(dest)) return fail(res, 409, `"${newName}" already exists`);
-        await fs.rename(target, dest);
-        broadcast(req, 'filesystem:changed', { reason: 'rename', path: parts, newPath: destParts });
-        res.json({ success: true, message: 'Renamed', data: { oldName: parts.at(-1), newName, path: destParts } });
+        if (!fsSync.existsSync(source)) return fail(res, 404, 'File or folder not found');
+        if (fsSync.existsSync(dest) && source !== dest) {
+          return fail(res, 409, `A file or folder named "${newName}" already exists there`);
+        }
+        await fs.rename(source, dest);
+        broadcast(req, 'filesystem:changed', { reason: 'rename', oldPath: parts, newPath: destParts });
+        res.json({
+          success: true,
+          message: 'Renamed',
+          data: { oldName: parts.at(-1), newName, path: destParts },
+        });
       } catch (error) {
         console.error('Rename error:', error);
         fail(res, 500, error.message);
@@ -320,6 +396,28 @@ export const deleteFileOrFolder = async (req, res) => {
 };
 
 /**
+ * Decode buffer to text safely handling utf-8, UTF-8 BOM, UTF-16LE, and UTF-16BE
+ */
+export const decodeText = (buf) => {
+  if (!buf || !buf.length) return '';
+  try {
+    if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+      return buf.subarray(3).toString('utf-8');
+    }
+    if (buf[0] === 0xff && buf[1] === 0xfe) {
+      return buf.subarray(2).toString('utf16le');
+    }
+    if (buf[0] === 0xfe && buf[1] === 0xff) {
+      const swapped = Buffer.from(buf.subarray(2)).swap16();
+      return swapped.toString('utf16le');
+    }
+    return buf.toString('utf-8');
+  } catch {
+    return '';
+  }
+};
+
+/**
  * GET /api/filesystem/:projectId/file?path=["src","index.js"]
  */
 export const getFileContent = async (req, res) => {
@@ -342,13 +440,18 @@ export const getFileContent = async (req, res) => {
       if (BINARY_EXT.has(path.extname(target).toLowerCase())) {
         return fail(res, 415, 'Binary file - open it with Download instead');
       }
+      const rawText = decodeText(await fs.readFile(target));
+      const mongoFile = await syncMongoFile(req.params.projectId, parts, parts.at(-1), rawText, req.userId);
+
       res.json({
         success: true,
         data: {
           name: parts.at(-1),
           path: parts,
           id: parts.join('/'),
-          content: decodeText(await fs.readFile(target)),
+          content: rawText,
+          fileId: mongoFile ? mongoFile._id.toString() : parts.join('/'),
+          mongoFileId: mongoFile ? mongoFile._id.toString() : null
         },
       });
     } catch (error) {
@@ -369,8 +472,18 @@ export const updateFileContent = async (req, res) => {
     try {
       await ensureDir(path.dirname(target));
       await fs.writeFile(target, content ?? '', 'utf-8');
+      const mongoFile = await syncMongoFile(req.params.projectId, parts, parts.at(-1), content ?? '', req.userId);
       broadcast(req, 'file_updated', { path: parts, content: content ?? '' });
-      res.json({ success: true, message: 'Saved', data: { path: parts, id: parts.join('/') } });
+      res.json({
+        success: true,
+        message: 'Saved',
+        data: {
+          path: parts,
+          id: parts.join('/'),
+          fileId: mongoFile ? mongoFile._id.toString() : parts.join('/'),
+          mongoFileId: mongoFile ? mongoFile._id.toString() : null
+        }
+      });
     } catch (error) {
       console.error('Write error:', error);
       fail(res, 500, error.message);
@@ -380,8 +493,6 @@ export const updateFileContent = async (req, res) => {
 
 /**
  * POST /api/filesystem/:projectId/move   { path, targetPath }
- *
- * Drag-and-drop in the explorer. `targetPath` is the destination FOLDER; the entry keeps its name.
  */
 export const moveFileOrFolder = async (req, res) => {
   const { path: nodePath, targetPath = [] } = req.body;
@@ -397,7 +508,6 @@ export const moveFileOrFolder = async (req, res) => {
         if (path.resolve(source) === path.resolve(dest)) {
           return res.json({ success: true, message: 'Already there', data: { path: destParts } });
         }
-        // Dropping a folder inside itself would delete the tree it is being moved into.
         const rel = path.relative(source, dest);
         if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
           return fail(res, 400, 'Cannot move a folder into itself');
@@ -417,104 +527,66 @@ export const moveFileOrFolder = async (req, res) => {
 };
 
 /**
- * GET /api/filesystem/:projectId/search?q=needle&caseSensitive=&regex=
- *
- * Plain text search across the workspace, with line numbers so a hit can be clicked open.
- * ponytail: a straight recursive scan with caps. If projects ever get large enough for this to
- * feel slow, shell out to ripgrep instead of building an index.
+ * GET /api/filesystem/:projectId/search?q=needle
  */
-const SEARCH_MAX_FILES = 2000;
-const SEARCH_MAX_HITS = 300;
-const SEARCH_MAX_FILE_BYTES = 512 * 1024;
-
 export const searchProject = async (req, res) => {
-  const { projectId } = req.params;
-  const query = (req.query.q || '').toString();
-  if (!isSafeProjectId(projectId)) return fail(res, 400, 'Invalid project id');
-  if (query.length < 2) return fail(res, 400, 'Search needs at least 2 characters');
+  const query = (req.query.q || '').trim();
+  if (!query) return res.json({ success: true, data: [] });
+
+  const caseSensitive = req.query.caseSensitive === 'true';
+  const isRegex = req.query.regex === 'true';
 
   let matcher;
   try {
-    matcher = req.query.regex === 'true'
-      ? new RegExp(query, req.query.caseSensitive === 'true' ? '' : 'i')
-      : null;
-  } catch (error) {
-    return fail(res, 400, `Invalid regular expression: ${error.message}`);
+    if (isRegex) {
+      matcher = new RegExp(query, caseSensitive ? 'g' : 'gi');
+    } else {
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      matcher = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+    }
+  } catch (err) {
+    return fail(res, 400, `Invalid regex: ${err.message}`);
   }
-  const needle = req.query.caseSensitive === 'true' ? query : query.toLowerCase();
-
-  const root = await ensureProjectDir(projectId);
-  const results = [];
-  let filesScanned = 0;
-  let truncated = false;
-
-  const walk = async (dir, relParts) => {
-    if (truncated) return;
-    let entries = [];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (truncated) return;
-      const rel = [...relParts, entry.name];
-      if (entry.isDirectory()) {
-        if (NO_DESCEND.has(entry.name)) continue;
-        await walk(path.join(dir, entry.name), rel);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (BINARY_EXT.has(path.extname(entry.name).toLowerCase())) continue;
-      if (++filesScanned > SEARCH_MAX_FILES) {
-        truncated = true;
-        return;
-      }
-
-      const abs = path.join(dir, entry.name);
-      let stat;
-      try {
-        stat = await fs.stat(abs);
-      } catch {
-        continue;
-      }
-      if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
-
-      let text;
-      try {
-        text = decodeText(await fs.readFile(abs));
-      } catch {
-        continue;
-      }
-      // A file full of NULs is binary whatever its extension says.
-      if (text.includes('\u0000')) continue;
-
-      const lines = text.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const hit = matcher
-          ? matcher.test(line)
-          : (req.query.caseSensitive === 'true' ? line : line.toLowerCase()).includes(needle);
-        if (!hit) continue;
-
-        results.push({
-          path: rel,
-          id: rel.join('/'),
-          name: entry.name,
-          line: i + 1,
-          preview: line.length > 200 ? `${line.slice(0, 200)}…` : line,
-        });
-        if (results.length >= SEARCH_MAX_HITS) {
-          truncated = true;
-          return;
-        }
-      }
-    }
-  };
 
   try {
-    await walk(root, []);
-    res.json({ success: true, data: { results, truncated, filesScanned } });
+    const root = await ensureProjectDir(req.params.projectId);
+    const results = [];
+
+    const searchDir = async (dir, prefix = []) => {
+      if (results.length >= 200) return;
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (results.length >= 200) break;
+        const rel = [...prefix, entry.name];
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!NO_DESCEND.has(entry.name)) {
+            await searchDir(full, rel);
+          }
+        } else {
+          if (BINARY_EXT.has(path.extname(entry.name).toLowerCase())) continue;
+          const stat = await fs.stat(full).catch(() => null);
+          if (!stat || stat.size > MAX_EDITABLE_BYTES) continue;
+
+          const text = decodeText(await fs.readFile(full));
+          const lines = text.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            if (results.length >= 200) break;
+            matcher.lastIndex = 0;
+            if (matcher.test(lines[i])) {
+              results.push({
+                path: rel,
+                line: i + 1,
+                snippet: lines[i].slice(0, 300),
+              });
+            }
+          }
+        }
+      }
+    };
+
+    await searchDir(root);
+    res.json({ success: true, data: results });
   } catch (error) {
     console.error('Search error:', error);
     fail(res, 500, error.message);
@@ -522,7 +594,7 @@ export const searchProject = async (req, res) => {
 };
 
 /**
- * GET /api/filesystem/:projectId/download?path=[...]  - raw bytes, for binaries and backups.
+ * GET /api/filesystem/:projectId/download?path=["src","image.png"]
  */
 export const downloadFile = async (req, res) => {
   let nodePath = req.query.path;
@@ -534,9 +606,15 @@ export const downloadFile = async (req, res) => {
   if (!nodePath?.length) return fail(res, 400, 'path is required');
 
   return withPath(req, res, nodePath, async ({ target, parts }) => {
-    const stat = await fs.stat(target).catch(() => null);
-    if (!stat || stat.isDirectory()) return fail(res, 404, 'File not found');
-    res.download(target, parts.at(-1));
+    try {
+      if (!fsSync.existsSync(target)) return fail(res, 404, 'File not found');
+      const stat = await fs.stat(target);
+      if (stat.isDirectory()) return fail(res, 400, 'Cannot download a folder directly');
+      res.download(target, parts.at(-1));
+    } catch (error) {
+      console.error('Download error:', error);
+      fail(res, 500, error.message);
+    }
   });
 };
 
@@ -578,6 +656,7 @@ export default {
   deleteFileOrFolder,
   getFileContent,
   updateFileContent,
+  syncMongoFile,
   moveFileOrFolder,
   searchProject,
   downloadFile,
