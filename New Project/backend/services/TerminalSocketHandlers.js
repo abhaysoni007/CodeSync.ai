@@ -37,6 +37,23 @@ const canUseProject = async (projectId, userId) => {
   return Boolean(project);
 };
 
+// A short prompt showing only the current folder - the container's full host path
+// (Render mounts the app under something like ~/project/src/.../projects/<id>) is
+// noise the embedded terminal shouldn't be printing on every line.
+const shortPS1 = '\\W $ ';
+
+// bash's normal startup (~/.bashrc for non-login shells) sets its own PS1, which would
+// clobber an env var override. A tiny rcfile that sources ~/.bashrc first and then sets
+// PS1 last keeps the user's aliases/completions while still shortening the prompt.
+let bashRcFile = null;
+const getBashRcFile = () => {
+  if (bashRcFile) return bashRcFile;
+  const target = path.join(os.tmpdir(), 'codesync-terminal.bashrc');
+  fs.writeFileSync(target, `[ -f ~/.bashrc ] && source ~/.bashrc\nPS1='${shortPS1}'\n`);
+  bashRcFile = target;
+  return bashRcFile;
+};
+
 // The shell a user expects on this platform. Windows gets PowerShell unless they asked otherwise.
 const shellFor = (requested) => {
   if (os.platform() === 'win32') {
@@ -47,6 +64,9 @@ const shellFor = (requested) => {
   const file = process.env.SHELL || (os.platform() === 'darwin' ? '/bin/zsh' : '/bin/bash');
   // Non-login: a login shell sources .bash_profile, which on some base images (e.g. Render's)
   // cd's to $HOME and silently overrides the cwd we just set to the project directory.
+  if (file.endsWith('bash')) {
+    return { file, args: ['--rcfile', getBashRcFile()] };
+  }
   return { file, args: [] };
 };
 
