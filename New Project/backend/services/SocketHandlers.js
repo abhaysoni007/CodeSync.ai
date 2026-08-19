@@ -206,15 +206,14 @@ export default function setupYjsHandlers(io) {
 
         // Send awareness state to the joining client
         if (awareness) {
-          const awarenessEncoder = encoding.createEncoder();
-          encoding.writeVarUint8Array(
-            awarenessEncoder,
-            awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(awareness.getStates().keys()))
+          const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(
+            awareness,
+            Array.from(awareness.getStates().keys())
           );
           socket.emit('yjs:awareness', {
             projectId,
             filePath,
-            update: encoding.toUint8Array(awarenessEncoder)
+            update: awarenessUpdate
           });
         }
 
@@ -331,10 +330,9 @@ export default function setupYjsHandlers(io) {
 
         // Save message to MongoDB
         const newMessage = new Message({
-          projectId,
-          userId: socket.userId,
-          username: socket.username,
-          message: message.trim(),
+          projectId: socket.userId ? projectId : null,
+          senderId: socket.userId,
+          content: message.trim(),
           timestamp: new Date()
         });
 
@@ -344,8 +342,10 @@ export default function setupYjsHandlers(io) {
           id: newMessage._id,
           projectId,
           userId: socket.userId,
+          senderId: socket.userId,
           username: socket.username,
           message: message.trim(),
+          content: message.trim(),
           timestamp: newMessage.timestamp.toISOString()
         };
 

@@ -357,16 +357,12 @@ const ProjectRoom = () => {
     const handleLocalAwareness = ({ added, updated, removed }, origin) => {
       if (origin !== 'remote-socket' && socketInstance.connected) {
         const changedClients = added.concat(updated).concat(removed);
-        const encoder = encoding.createEncoder();
-        encoding.writeVarUint8Array(
-          encoder,
-          awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients)
-        );
+        const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
         
         socketInstance.emit('yjs:awareness', {
           projectId: id,
           filePath: activeFile.path,
-          update: encoding.toUint8Array(encoder)
+          update: update
         });
       }
     };
@@ -888,29 +884,27 @@ const ProjectRoom = () => {
         </div>
 
         {/* Right Sidebar - Video & Project Chat */}
-        <div className="w-80 border-l border-vscode-border flex flex-col bg-vscode-panel">
-          <VideoChatPanel
-            socket={socket}
-            projectId={id}
-            user={user}
-            currentUser={user}
-            onlineUsers={onlineUsers}
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            newMessage={newMessage}
-            onMessageChange={(e) => {
-              setNewMessage(e.target.value);
-              handleTyping();
-            }}
-            typingUsers={typingUsers}
-            showChat={showChat}
-            onToggleChat={(isChat) => {
-              setShowChat(isChat);
-              if (isChat) setUnreadMessages(0);
-            }}
-            unreadMessages={unreadMessages}
-          />
-        </div>
+        <VideoChatPanel
+          socket={socket}
+          projectId={id}
+          user={user}
+          currentUser={user}
+          onlineUsers={onlineUsers}
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          newMessage={newMessage}
+          onMessageChange={(e) => {
+            setNewMessage(e.target.value);
+            handleTyping();
+          }}
+          typingUsers={typingUsers}
+          showChat={showChat}
+          onToggleChat={(isChat) => {
+            setShowChat(isChat);
+            if (isChat) setUnreadMessages(0);
+          }}
+          unreadMessages={unreadMessages}
+        />
 
         {/* Activity Timeline Slide-out */}
         {showActivityPanel && (

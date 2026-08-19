@@ -14,7 +14,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:5173',
     trace: 'retain-on-failure',
-    video: 'retain-on-failure',
+    video: 'off',
     screenshot: 'only-on-failure',
     actionTimeout: 15_000,
     channel: process.env.CI ? undefined : 'chrome',

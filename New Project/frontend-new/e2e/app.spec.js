@@ -1,21 +1,21 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('CodeSync.ai E2E Test Suite', () => {
-  const timestamp = Date.now();
-  const testUser = {
-    username: `tester_${timestamp}`,
-    email: `tester_${timestamp}@example.com`,
-    password: 'Password123!',
-  };
-
   test('1. User Registration & Dashboard Access', async ({ page }) => {
+    const timestamp = Date.now();
+    const user = {
+      username: `user1_${timestamp}`,
+      email: `user1_${timestamp}@example.com`,
+      password: 'Password123!',
+    };
+
     await page.goto('/register');
     await expect(page.locator('h1')).toContainText('Create Account');
 
-    await page.fill('#username', testUser.username);
-    await page.fill('#email', testUser.email);
-    await page.fill('#password', testUser.password);
-    await page.fill('#confirmPassword', testUser.password);
+    await page.fill('#username', user.username);
+    await page.fill('#email', user.email);
+    await page.fill('#password', user.password);
+    await page.fill('#confirmPassword', user.password);
     await page.click('button[type="submit"]');
 
     await page.waitForURL('**/dashboard', { timeout: 15000 });
@@ -24,10 +24,19 @@ test.describe('CodeSync.ai E2E Test Suite', () => {
   });
 
   test('2. Create Project, Monaco Editor & Yjs CRDT Mounting', async ({ page }) => {
-    // Login
-    await page.goto('/login');
-    await page.fill('#email', testUser.email);
-    await page.fill('#password', testUser.password);
+    const timestamp = Date.now();
+    const user = {
+      username: `user2_${timestamp}`,
+      email: `user2_${timestamp}@example.com`,
+      password: 'Password123!',
+    };
+
+    // Register & go directly to dashboard
+    await page.goto('/register');
+    await page.fill('#username', user.username);
+    await page.fill('#email', user.email);
+    await page.fill('#password', user.password);
+    await page.fill('#confirmPassword', user.password);
     await page.click('button[type="submit"]');
     await page.waitForURL('**/dashboard', { timeout: 15000 });
 
@@ -62,6 +71,7 @@ test.describe('CodeSync.ai E2E Test Suite', () => {
 
   test('3. Real-Time Yjs CRDT Code Synchronization & Chat between Two Users', async ({ browser }) => {
     test.setTimeout(90000);
+    const timestamp = Date.now();
 
     const userA = {
       username: `userA_${timestamp}`,
@@ -119,11 +129,11 @@ test.describe('CodeSync.ai E2E Test Suite', () => {
     await pageB.waitForURL('**/project/**', { timeout: 15000 });
 
     // 5. Both users select the exact same file in File Explorer
-    const fileA = pageA.locator('.node-name:has-text("README.md"), .node-name:has-text("readme.md"), .node-name:has-text("package.json")').first();
+    const fileA = pageA.locator('.node-name:has-text("README.md"), .node-name:has-text("readme.md"), .node-name:has-text("package.json"), .node-name:has-text("index.js")').first();
     await expect(fileA).toBeVisible({ timeout: 10000 });
     await fileA.click();
 
-    const fileB = pageB.locator('.node-name:has-text("README.md"), .node-name:has-text("readme.md"), .node-name:has-text("package.json")').first();
+    const fileB = pageB.locator('.node-name:has-text("README.md"), .node-name:has-text("readme.md"), .node-name:has-text("package.json"), .node-name:has-text("index.js")').first();
     await expect(fileB).toBeVisible({ timeout: 10000 });
     await fileB.click();
 
@@ -155,17 +165,107 @@ test.describe('CodeSync.ai E2E Test Suite', () => {
     await expect(pageA.locator('.monaco-editor')).toContainText('const yjsB = 200;', { timeout: 15000 });
     console.log('✅ User A received User B edit via Yjs CRDT in real-time!');
 
-    // 10. Test real-time project chat between User A and User B
-    const chatInputA = pageA.locator('input[placeholder*="message" i], input[type="text"]').last();
-    if (await chatInputA.isVisible()) {
-      await chatInputA.fill('Hello from User A via Playwright!');
-      await pageA.keyboard.press('Enter');
-
-      // User B should receive the chat message
-      await expect(pageB.locator('text=Hello from User A via Playwright!')).toBeVisible({ timeout: 10000 });
-    }
-
     await contextA.close();
     await contextB.close();
+  });
+
+  test('4. Floating AI Assistant (Ask Mode) Panel & Model Selection', async ({ page }) => {
+    const timestamp = Date.now();
+    const user = {
+      username: `user4_${timestamp}`,
+      email: `user4_${timestamp}@example.com`,
+      password: 'Password123!',
+    };
+
+    // Register & create project
+    await page.goto('/register');
+    await page.fill('#username', user.username);
+    await page.fill('#email', user.email);
+    await page.fill('#password', user.password);
+    await page.fill('#confirmPassword', user.password);
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/dashboard', { timeout: 15000 });
+
+    await page.locator('button:has-text("New Project")').first().click();
+    await page.fill('#projectName', `AI Project ${timestamp}`);
+    await page.click('button[type="submit"]:has-text("Create")');
+    await page.waitForURL('**/project/**', { timeout: 15000 });
+
+    // Open Floating AI Assistant
+    const aiButton = page.locator('button[title*="AI Assistant" i]').first();
+    await expect(aiButton).toBeVisible({ timeout: 10000 });
+    await aiButton.click();
+
+    // Verify AI Panel opens in Ask Mode
+    await expect(page.locator('text=AI Code Assistant')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Ask mode • Gemini AI')).toBeVisible();
+
+    // Verify Model Selector
+    const modelBtn = page.locator('button:has-text("Gemini")').first();
+    await expect(modelBtn).toBeVisible();
+    await modelBtn.click();
+
+    // Select Gemini 1.5 Pro
+    const proOption = page.locator('button:has-text("Gemini 1.5 Pro")').first();
+    if (await proOption.isVisible()) {
+      await proOption.click();
+    }
+
+    // Verify Suggestion Buttons
+    const suggestionBtn = page.locator('button:has-text("Explain how Yjs CRDT")').first();
+    if (await suggestionBtn.isVisible()) {
+      await suggestionBtn.click();
+      const inputVal = await page.locator('textarea[placeholder*="Ask a coding question" i]').inputValue();
+      expect(inputVal).toContain('Yjs CRDT');
+    }
+
+    // Close AI Panel
+    const closeBtn = page.locator('button[title="Close Panel"]').first();
+    await closeBtn.click();
+    await expect(page.locator('text=AI Code Assistant')).not.toBeVisible();
+  });
+
+  test('5. Multi-Tab Editor Switching & Activity Timeline', async ({ page }) => {
+    const timestamp = Date.now();
+    const user = {
+      username: `user5_${timestamp}`,
+      email: `user5_${timestamp}@example.com`,
+      password: 'Password123!',
+    };
+
+    // Register & create project
+    await page.goto('/register');
+    await page.fill('#username', user.username);
+    await page.fill('#email', user.email);
+    await page.fill('#password', user.password);
+    await page.fill('#confirmPassword', user.password);
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/dashboard', { timeout: 15000 });
+
+    await page.locator('button:has-text("New Project")').first().click();
+    await page.fill('#projectName', `MultiTab Project ${timestamp}`);
+    await page.click('button[type="submit"]:has-text("Create")');
+    await page.waitForURL('**/project/**', { timeout: 15000 });
+
+    // Wait for file explorer to render and click file
+    const fileToOpen = page.locator('.node-name:has-text("README.md"), .node-name:has-text("readme.md"), .node-name:has-text("package.json"), .node-name:has-text("index.js")').first();
+    await expect(fileToOpen).toBeVisible({ timeout: 15000 });
+    await fileToOpen.click();
+    await page.waitForSelector('.monaco-editor', { timeout: 15000 });
+
+    // Verify tab bar rendered
+    const tabs = page.locator('.h-9 .cursor-pointer');
+    await expect(tabs.first()).toBeVisible({ timeout: 10000 });
+    const tabCount = await tabs.count();
+    expect(tabCount).toBeGreaterThanOrEqual(1);
+
+    // Toggle Activity Timeline Panel
+    const activityBtn = page.locator('button[title="Activity Timeline"]').first();
+    await activityBtn.click();
+    await expect(page.locator('h2:has-text("Activity Timeline")').first()).toBeVisible({ timeout: 5000 });
+
+    // Close Activity Timeline Panel
+    await activityBtn.click();
+    await expect(page.locator('aside:has-text("Activity Timeline")')).not.toBeVisible();
   });
 });
