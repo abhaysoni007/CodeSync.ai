@@ -1,19 +1,13 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PropTypes from 'prop-types';
-import { FiSend, FiChevronDown } from 'react-icons/fi';
+import { FiSend, FiChevronDown, FiCpu } from 'react-icons/fi';
 import { useAI } from '@/context/AIContext';
 
 const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
-  const { mode, switchMode, model, switchModel } = useAI();
+  const { model, switchModel } = useAI();
   const textareaRef = useRef(null);
-  const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-
-  const modes = [
-    { id: 'ask', label: '💬 Ask Mode', desc: 'Q&A Assistant' },
-    { id: 'agent', label: '🤖 Agent Mode', desc: 'Code Generator' }
-  ];
 
   const models = [
     { id: 'gemini-2.0-flash-exp', label: '⚡ Gemini 2.0 Flash', desc: 'Ultra-fast responses' },
@@ -28,17 +22,15 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
     }
   }, [input]);
 
-  // Close dropdowns when clicking outside
+  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = () => {
-      setShowModeDropdown(false);
       setShowModelDropdown(false);
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const currentMode = modes.find(m => m.id === mode) || modes[0];
   const currentModel = models.find(m => m.id === model) || models[0];
 
   return (
@@ -52,13 +44,9 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={onKeyPress}
-              placeholder={
-                mode === 'ask'
-                  ? 'Ask a question...'
-                  : 'Enter command (e.g., "Create a navbar component")...'
-              }
+              placeholder="Ask a coding question, request explanation, or debug code..."
               disabled={isLoading}
-              className="w-full bg-[#0D0F12] text-gray-200 border border-[#292E38] rounded-lg px-4 py-3 pr-12 resize-none focus:outline-none focus:border-[#E8A855] focus:ring-1 focus:ring-[#E8A855] disabled:opacity-50 disabled:cursor-not-allowed custom-scrollbar"
+              className="w-full bg-[#0D0F12] text-gray-200 border border-[#292E38] rounded-lg px-4 py-3 pr-12 resize-none focus:outline-none focus:border-[#E8A855] focus:ring-1 focus:ring-[#E8A855] disabled:opacity-50 disabled:cursor-not-allowed custom-scrollbar text-sm"
               rows={1}
               style={{ maxHeight: '150px' }}
             />
@@ -85,6 +73,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
             }`}
             whileHover={input.trim() && !isLoading ? { scale: 1.05 } : {}}
             whileTap={input.trim() && !isLoading ? { scale: 0.95 } : {}}
+            title="Send (Enter)"
           >
             <FiSend className="w-5 h-5" />
           </motion.button>
@@ -93,55 +82,10 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
 
       {/* Bottom Controls Bar */}
       <div className="px-4 pb-3 flex items-center justify-between border-t border-[#292E38]/50 pt-2">
-        {/* Left: Mode Selector */}
-        <div className="relative">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowModeDropdown(!showModeDropdown);
-              setShowModelDropdown(false);
-            }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#1C2027] hover:bg-[#292E38] rounded-lg text-sm text-gray-300 transition-colors"
-          >
-            <span>{currentMode.label}</span>
-            <FiChevronDown className={`w-3 h-3 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} />
-          </button>
-
-          {/* Mode Dropdown */}
-          <AnimatePresence>
-            {showModeDropdown && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="absolute bottom-full left-0 mb-2 bg-[#15181D] border border-[#292E38] rounded-lg shadow-2xl overflow-hidden min-w-[200px] z-50"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {modes.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => {
-                      switchMode(m.id);
-                      setShowModeDropdown(false);
-                    }}
-                    className={`w-full px-4 py-2.5 text-left hover:bg-[#1C2027] transition-colors ${
-                      mode === m.id ? 'bg-[#E8A855]/20 border-l-2 border-[#E8A855]' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium text-gray-200">{m.label}</div>
-                        <div className="text-xs text-gray-500">{m.desc}</div>
-                      </div>
-                      {mode === m.id && (
-                        <div className="w-2 h-2 rounded-full bg-green-500" />
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
+        {/* Left: Mode Badge */}
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <FiCpu className="w-3.5 h-3.5 text-vscode-accent" />
+          <span className="font-medium text-gray-300">Ask Mode</span>
         </div>
 
         {/* Right: Model Selector */}
@@ -150,9 +94,8 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
             onClick={(e) => {
               e.stopPropagation();
               setShowModelDropdown(!showModelDropdown);
-              setShowModeDropdown(false);
             }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#1C2027] hover:bg-[#292E38] rounded-lg text-sm text-gray-300 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 bg-[#1C2027] hover:bg-[#292E38] rounded-lg text-xs text-gray-300 transition-colors border border-[#292E38]"
           >
             <span>{currentModel.label}</span>
             <FiChevronDown className={`w-3 h-3 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
@@ -165,7 +108,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="absolute bottom-full right-0 mb-2 bg-[#15181D] border border-[#292E38] rounded-lg shadow-2xl overflow-hidden min-w-[240px] z-50"
+                className="absolute bottom-full right-0 mb-2 bg-[#15181D] border border-[#292E38] rounded-lg shadow-2xl overflow-hidden min-w-[220px] z-50"
                 onClick={(e) => e.stopPropagation()}
               >
                 {models.map((m) => (
@@ -175,17 +118,17 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                       switchModel(m.id);
                       setShowModelDropdown(false);
                     }}
-                    className={`w-full px-4 py-2.5 text-left hover:bg-[#1C2027] transition-colors ${
-                      model === m.id ? 'bg-[#E8A855]/20 border-l-2 border-[#E8A855]' : ''
+                    className={`w-full px-3.5 py-2.5 text-left hover:bg-[#1C2027] transition-colors ${
+                      model === m.id ? 'bg-[#E8A855]/10 border-l-2 border-[#E8A855]' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-medium text-gray-200">{m.label}</div>
-                        <div className="text-xs text-gray-500">{m.desc}</div>
+                        <div className="text-xs font-medium text-gray-200">{m.label}</div>
+                        <div className="text-[10px] text-gray-500">{m.desc}</div>
                       </div>
                       {model === m.id && (
-                        <div className="w-2 h-2 rounded-full bg-green-500" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
                       )}
                     </div>
                   </button>
@@ -197,20 +140,15 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
       </div>
 
       {/* Status Text */}
-      <div className="px-4 pb-3 text-xs text-gray-500 flex items-center justify-between">
+      <div className="px-4 pb-2.5 text-[11px] text-gray-500 flex items-center justify-between">
         <span>
           {isLoading ? (
-            <span className="text-vscode-accent animate-pulse">Processing with Gemini...</span>
+            <span className="text-vscode-accent animate-pulse">Generating answer with Gemini...</span>
           ) : (
-            'Press Enter to send, Shift+Enter for new line'
+            'Enter to send • Shift+Enter for new line'
           )}
         </span>
-        <span className="flex items-center gap-2">
-          {mode === 'agent' && !isLoading && (
-            <span className="text-yellow-500">⚡ Auto-generates files</span>
-          )}
-          <span className="text-gray-600">• Powered by Google Gemini</span>
-        </span>
+        <span className="text-gray-600">Powered by Google Gemini</span>
       </div>
     </div>
   );

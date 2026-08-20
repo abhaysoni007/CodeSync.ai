@@ -5,8 +5,10 @@ node_modules
 
 # Testing
 /coverage
-/test-results
-/playwright-report
+test-results/
+playwright-report/
+blob-report/
+e2e/.auth/
 
 # Production
 dist
@@ -35,6 +37,3 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-e2e/.auth/
-test-results/
-playwright-report/

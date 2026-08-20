@@ -29,6 +29,7 @@ Thumbs.db
 dist/
 build/
 
-# Dynamic runtime files
-projects/
+# Uploads & Storage
+uploads/
 uploads/file-structures/
+projects/

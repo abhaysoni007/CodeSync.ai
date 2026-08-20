@@ -11,9 +11,9 @@
     "lint": "eslint . --ext js,jsx",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write .",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -22,6 +22,7 @@
     "clsx": "^2.0.0",
     "date-fns": "^2.30.0",
     "framer-motion": "^10.18.0",
+    "lib0": "^0.2.94",
     "lucide-react": "^0.294.0",
     "prop-types": "^15.8.1",
     "radix-ui": "^1.6.7",
@@ -39,6 +40,9 @@
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
     "xterm-addon-web-links": "^0.9.0",
+    "y-monaco": "^0.1.6",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.10",
     "zustand": "^4.5.7"
   },
   "devDependencies": {

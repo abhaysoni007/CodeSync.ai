@@ -3,31 +3,47 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import FileVersion from '../models/FileVersion.js';
-import File from '../models/File.js';
-import crypto from 'crypto';
+import fs from 'fs/promises';
+import { resolveProjectPath, syncMongoFile } from '../controllers/FileSystemController.js';
+
+/**
+ * Normalizes project ID and file path into a single document key
+ */
+export const normalizeKey = (projectId, filePath) => {
+  const pathStr = Array.isArray(filePath) ? filePath.join('/') : String(filePath || '');
+  return `${projectId}:${pathStr}`;
+};
+
+/**
+ * Normalizes file path into array format for filesystem resolution
+ */
+export const normalizePathArray = (filePath) => {
+  if (Array.isArray(filePath)) return filePath.filter((p) => p !== 'root');
+  if (!filePath) return [];
+  return String(filePath).split('/').filter(Boolean).filter((p) => p !== 'root');
+};
 
 /**
  * Yjs Document Manager
- * Manages collaborative editing with Yjs documents
+ * Coordinates collaborative CRDT documents across users and persists changes to project filesystem.
  */
 class YjsDocumentManager {
   constructor() {
-    // Map of document instances: key = "roomId:fileId"
+    // Map of document instances: key = "projectId:filePath"
     this.docs = new Map();
     
-    // Map of awareness instances
+    // Map of awareness instances: key = "projectId:filePath"
     this.awareness = new Map();
     
-    // Debounce timers for saving
+    // Debounce timers for auto-saving: key = "projectId:filePath"
     this.saveTimers = new Map();
   }
 
   /**
-   * Get or create Yjs document for a room/file pair
+   * Get or create Yjs document for a project/file pair
    */
-  async getDocument(roomId, fileId) {
-    const key = `${roomId}:${fileId}`;
+  async getDocument(projectId, filePath, initialContent = null) {
+    const key = normalizeKey(projectId, filePath);
     
     if (this.docs.has(key)) {
       return this.docs.get(key);
@@ -36,12 +52,15 @@ class YjsDocumentManager {
     // Create new Yjs document
     const ydoc = new Y.Doc();
     
-    // Load existing content from database
-    await this.loadDocumentFromDB(ydoc, fileId);
+    // Load existing content from disk or fallback
+    await this.loadDocumentFromFilesystem(ydoc, projectId, filePath, initialContent);
     
-    // Listen for updates to persist
-    ydoc.on('update', (update) => {
-      this.scheduleDocumentSave(roomId, fileId, ydoc, update);
+    // Listen for document updates to schedule debounced auto-save
+    ydoc.on('update', (update, origin) => {
+      // Avoid scheduling save if originated internally from initial load
+      if (origin !== 'initial-load') {
+        this.scheduleDocumentSave(projectId, filePath, ydoc);
+      }
     });
 
     this.docs.set(key, ydoc);
@@ -56,62 +75,77 @@ class YjsDocumentManager {
   /**
    * Get awareness instance for a document
    */
-  getAwareness(roomId, fileId) {
-    const key = `${roomId}:${fileId}`;
+  getAwareness(projectId, filePath) {
+    const key = normalizeKey(projectId, filePath);
     return this.awareness.get(key);
   }
 
   /**
-   * Load document content from MongoDB
+   * Load document content from disk filesystem
    */
-  async loadDocumentFromDB(ydoc, fileId) {
+  async loadDocumentFromFilesystem(ydoc, projectId, filePath, fallbackContent = null) {
     try {
-      // Get file from database
-      const file = await File.findById(fileId);
-      
-      if (!file) {
-        console.log(`File ${fileId} not found, initializing empty document`);
-        return;
+      const pathArray = normalizePathArray(filePath);
+      const { target } = resolveProjectPath(projectId, pathArray);
+      let content = fallbackContent;
+      try {
+        content = await fs.readFile(target, 'utf-8');
+      } catch {
+        content = fallbackContent || '';
       }
 
-      // Get latest version with Yjs update
-      const latestVersion = await FileVersion.findOne({ fileId })
-        .sort({ versionNumber: -1 })
-        .limit(1);
-
-      if (latestVersion && latestVersion.diff) {
-        // If we have a Yjs update stored, apply it
-        try {
-          const updateBuffer = Buffer.from(latestVersion.diff, 'base64');
-          Y.applyUpdate(ydoc, updateBuffer);
-          console.log(`✅ Loaded Yjs state for file ${fileId}`);
-        } catch (error) {
-          console.error('Error applying Yjs update:', error);
-          // Fallback to content
-          this.initializeFromContent(ydoc, file.content);
-        }
-      } else {
-        // Initialize from file content
-        this.initializeFromContent(ydoc, file.content);
-      }
+      this.initializeFromContent(ydoc, content || '');
+      console.log(`✅ Loaded Yjs doc for ${projectId}:${pathArray.join('/')}`);
     } catch (error) {
-      console.error('Error loading document from DB:', error);
+      console.error(`Error loading Yjs doc for ${projectId}:`, error);
+      this.initializeFromContent(ydoc, fallbackContent || '');
     }
   }
 
   /**
-   * Initialize Yjs document from plain text content
+   * Initialize Yjs document with plain text content
    */
   initializeFromContent(ydoc, content) {
     const ytext = ydoc.getText('monaco');
-    ytext.insert(0, content || '');
+    if (ytext.length === 0 && content) {
+      ydoc.transact(() => {
+        ytext.insert(0, content);
+      }, 'initial-load');
+    }
   }
 
   /**
-   * Schedule document save with debouncing (5 seconds)
+   * Handle incoming Yjs sync protocol binary message
+   * Returns reply Uint8Array if one is needed (Step 2 or sync reply)
    */
-  scheduleDocumentSave(roomId, fileId, ydoc, update) {
-    const key = `${roomId}:${fileId}`;
+  handleSyncMessage(ydoc, messageBuffer) {
+    if (!ydoc || !messageBuffer) return null;
+    
+    try {
+      const uint8 = messageBuffer instanceof Uint8Array 
+        ? messageBuffer 
+        : new Uint8Array(messageBuffer);
+
+      const decoder = decoding.createDecoder(uint8);
+      const encoder = encoding.createEncoder();
+
+      syncProtocol.readSyncMessage(decoder, encoder, ydoc, null);
+
+      if (encoding.length(encoder) > 0) {
+        return encoding.toUint8Array(encoder);
+      }
+      return null;
+    } catch (error) {
+      console.error('Error handling Yjs sync message:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Schedule document save with debouncing (3 seconds)
+   */
+  scheduleDocumentSave(projectId, filePath, ydoc) {
+    const key = normalizeKey(projectId, filePath);
     
     // Clear existing timer
     if (this.saveTimers.has(key)) {
@@ -120,77 +154,36 @@ class YjsDocumentManager {
 
     // Set new timer
     const timer = setTimeout(() => {
-      this.saveDocumentToDB(roomId, fileId, ydoc, update);
-    }, 5000); // 5 second debounce
+      this.saveDocumentToFilesystem(projectId, filePath, ydoc);
+    }, 3000);
 
     this.saveTimers.set(key, timer);
   }
 
   /**
-   * Save document to MongoDB
+   * Save current document content to disk filesystem and sync MongoDB
    */
-  async saveDocumentToDB(roomId, fileId, ydoc, update) {
+  async saveDocumentToFilesystem(projectId, filePath, ydoc) {
     try {
-      // Get current content
       const ytext = ydoc.getText('monaco');
       const content = ytext.toString();
+      const pathArray = normalizePathArray(filePath);
+      const { target } = resolveProjectPath(projectId, pathArray);
 
-      // Update file content
-      const file = await File.findById(fileId);
-      if (!file) {
-        console.error(`File ${fileId} not found for saving`);
-        return;
-      }
-
-      file.content = content;
-      file.size = Buffer.byteLength(content, 'utf8');
-      file.metadata.lineCount = content.split('\n').length;
-      await file.save();
-
-      // Save Yjs state vector as a version
-      const stateVector = Y.encodeStateAsUpdate(ydoc);
-      const stateBase64 = Buffer.from(stateVector).toString('base64');
-      const contentHash = crypto.createHash('sha256').update(content).digest('hex');
-
-      // Get version number
-      const lastVersion = await FileVersion.findOne({ fileId })
-        .sort({ versionNumber: -1 })
-        .limit(1);
-      
-      const versionNumber = lastVersion ? lastVersion.versionNumber + 1 : 1;
-
-      // Create new version
-      const version = new FileVersion({
-        fileId,
-        versionNumber,
-        content,
-        contentHash,
-        diff: stateBase64, // Store Yjs state as diff
-        createdBy: file.lastModifiedBy || file.createdBy,
-        message: 'Auto-saved collaborative changes',
-        size: file.size,
-        isAutoSave: true,
-        metadata: {
-          linesAdded: 0,
-          linesRemoved: 0,
-          charactersAdded: content.length,
-          charactersRemoved: 0
-        }
-      });
-
-      await version.save();
-      
-      console.log(`✅ Saved version ${versionNumber} for file ${fileId}`);
+      await fs.writeFile(target, content, 'utf-8');
+      const fileName = pathArray[pathArray.length - 1] || 'file';
+      await syncMongoFile(projectId, pathArray, fileName, content, null);
+      console.log(`💾 Auto-saved collaborative changes to ${projectId}:${pathArray.join('/')}`);
     } catch (error) {
-      console.error('Error saving document to DB:', error);
+      console.error('Error saving collaborative document:', error);
     }
   }
 
   /**
-   * Remove document from memory
+   * Remove document from memory when no users are viewing it
    */
-  closeDocument(roomId, fileId) {
-    const key = `${roomId}:${fileId}`;
+  closeDocument(projectId, filePath) {
+    const key = normalizeKey(projectId, filePath);
     
     // Clear save timer
     if (this.saveTimers.has(key)) {
@@ -212,23 +205,7 @@ class YjsDocumentManager {
       this.awareness.delete(key);
     }
 
-    console.log(`🗑️ Closed document ${key}`);
-  }
-
-  /**
-   * Get sync message for a document
-   */
-  getSyncMessage(roomId, fileId, encodedState) {
-    const ydoc = this.docs.get(`${roomId}:${fileId}`);
-    if (!ydoc) return null;
-
-    const encoder = encoding.createEncoder();
-    const decoder = decoding.createDecoder(encodedState);
-    const messageType = decoding.readVarUint(decoder);
-
-    syncProtocol.readSyncMessage(decoder, encoder, ydoc, null);
-    
-    return encoding.toUint8Array(encoder);
+    console.log(`🗑️ Closed collaborative doc ${key}`);
   }
 }
 

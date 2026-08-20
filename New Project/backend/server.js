@@ -18,7 +18,6 @@ import roomRoutes from './routes/rooms.js';
 import fileRoutes from './routes/files.js';
 import callRoutes from './routes/calls.js';
 import aiRoutes from './routes/ai.js';
-import agentRoutes from './routes/agent.js';
 import filesystemRoutes from './routes/filesystem.js';
 import terminalRoutes from './routes/terminal.js';
 import previewRoutes from './routes/preview.js';
@@ -122,7 +121,6 @@ app.use('/rooms', roomRoutes);
 app.use('/files', fileRoutes);
 app.use('/rooms', callRoutes);
 app.use('/ai', aiRoutes);
-app.use('/ai', agentRoutes);
 app.use('/api/filesystem', filesystemRoutes);
 app.use('/api/terminal', terminalRoutes);
 

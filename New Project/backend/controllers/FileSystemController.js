@@ -157,9 +157,9 @@ export const syncMongoFile = async (projectId, pathInput, name, content, userId)
 };
 
 /**
- * Helper to load default structure if directory is completely empty
+ * Helper to write default files if project directory is empty
  */
-const writeDefaultProjectFiles = async (dir) => {
+export const writeDefaultProjectFiles = async (dir) => {
   const src = path.join(dir, 'src');
   await ensureDir(src);
   const mainFile = path.join(src, 'index.js');
