@@ -33,8 +33,6 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     addTerminal,
     removeTerminal,
     setActiveTerminal,
-    updateTerminalOutput,
-    clearTerminalOutput,
     setTerminalStatus,
   } = useTerminalStore();
 
@@ -45,6 +43,11 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
   
   const terminalRefs = useRef({});
   const fitAddonRefs = useRef({});
+  const resizeObserverRefs = useRef({});
+  // Terminals we have already asked the server to spawn a shell for, and the ones whose size we
+  // have actually measured (we refuse to spawn a shell before we can tell it a real window size).
+  const createdSessions = useRef(new Set());
+  const measuredTerminals = useRef(new Set());
   const containerRef = useRef(null);
   const resizeStartRef = useRef(null);
 
@@ -64,15 +67,9 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('terminal:output', (data) => {
-      const { terminalId, output } = data;
-      updateTerminalOutput(terminalId, output);
-      
-      // Append output to xterm
-      const term = terminalRefs.current[terminalId];
-      if (term) {
-        term.write(output);
-      }
+    // xterm owns the scrollback; copying output into React state re-rendered the panel per byte.
+    socket.on('terminal:output', ({ terminalId, output }) => {
+      terminalRefs.current[terminalId]?.write(output);
     });
 
     socket.on('terminal:error', (data) => {
@@ -93,20 +90,30 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       }
     });
 
-    socket.on('terminal:created', (data) => {
-      const { terminalId, cwd } = data;
+    // The PTY prints its own prompt; a second, fake one just left two prompts on screen. All we
+    // do on creation is make the shell agree with the window we are showing, and mark the tab
+    // ready so anything queued (the explorer's Run button) can fire.
+    socket.on('terminal:created', ({ terminalId }) => {
       const term = terminalRefs.current[terminalId];
-      if (term) {
-        term.write(`\x1b[32m[Terminal ready]\x1b[0m\r\n`);
-        term.write(`\x1b[36m${cwd}>\x1b[0m `);
-      }
+      if (term) socket.emit('terminal:resize', { terminalId, cols: term.cols, rows: term.rows });
+      setTerminalStatus(terminalId, 'ready');
     });
+
+    // A reconnect gives us a new socket id, and the server ties every PTY to the socket that
+    // created it - the old shells are gone. Re-create one per open tab instead of leaving dead
+    // panes behind.
+    const handleReconnect = () => {
+      createdSessions.current.clear();
+      Object.keys(terminalRefs.current).forEach((terminalId) => requestSession(terminalId));
+    };
+    socket.on('connect', handleReconnect);
 
     return () => {
       socket.off('terminal:output');
       socket.off('terminal:error');
       socket.off('terminal:exit');
       socket.off('terminal:created');
+      socket.off('connect', handleReconnect);
     };
   }, [socket]);
 
@@ -124,14 +131,23 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     // Cleanup removed terminals
     Object.keys(terminalRefs.current).forEach((terminalId) => {
       if (!terminals.find(t => t.id === terminalId)) {
-        if (terminalRefs.current[terminalId]) {
-          terminalRefs.current[terminalId].dispose();
-          delete terminalRefs.current[terminalId];
-          delete fitAddonRefs.current[terminalId];
-        }
+        disposeTerminal(terminalId);
       }
     });
-  }, [terminals, isVisible]);
+  }, [terminals, isVisible, socket]);
+
+  // Focus (and re-fit) whichever tab the user just switched to, the way VS Code does.
+  useEffect(() => {
+    if (!isVisible || isCollapsed) return;
+    const term = terminalRefs.current[activeTerminalId];
+    if (!term) return;
+    try {
+      fitAddonRefs.current[activeTerminalId]?.fit();
+    } catch (error) {
+      console.error('Error fitting terminal:', error);
+    }
+    term.focus();
+  }, [activeTerminalId, isVisible, isCollapsed, isMaximized, panelHeight]);
 
   // Fit terminal on resize
   useEffect(() => {
@@ -159,11 +175,11 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       fontSize: 14,
       fontFamily: '"JetBrains Mono", Consolas, "Courier New", monospace',
       theme: {
-        background: '#0D0F12',
-        foreground: '#F4F4F5',
-        cursor: '#E8A855',
-        cursorAccent: '#0D0F12',
-        selectionBackground: '#3A2A1480',
+        background: '#0A0A0B',
+        foreground: '#EDEDEF',
+        cursor: '#7C7CFF',
+        cursorAccent: '#0A0A0B',
+        selectionBackground: '#7C7CFF33',
         black: '#000000',
         red: '#cd3131',
         green: '#0dbc79',
@@ -199,14 +215,25 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     terminalRefs.current[terminalId] = term;
     fitAddonRefs.current[terminalId] = fitAddon;
 
-    // Fit terminal to container
-    setTimeout(() => {
+    // WHY a ResizeObserver instead of a setTimeout: a tab that is still hidden (or a panel mid
+    // animation) measures 0px, and fitting against that gave the shell a ~13-column window, so
+    // every command wrapped after a few characters. The observer fires once the element really
+    // has a size - and again on every panel resize, maximise or tab switch.
+    const observer = new ResizeObserver(() => {
+      const el = document.getElementById(`xterm-${terminalId}`);
+      if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
       try {
         fitAddon.fit();
       } catch (error) {
         console.error('Error fitting terminal:', error);
+        return;
       }
-    }, 100);
+      // Only ask for a shell once we can tell it a truthful window size.
+      measuredTerminals.current.add(terminalId);
+      requestSession(terminalId);
+    });
+    observer.observe(terminalElement);
+    resizeObserverRefs.current[terminalId] = observer;
 
     // Send every keystroke straight to the PTY. WHY: the shell (not this component) owns line
     // editing, history, tab completion and Ctrl+C - that is what makes it behave like VS Code.
@@ -221,16 +248,39 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
       socket.emit('terminal:resize', { terminalId, cols, rows });
     });
 
-    // Request terminal creation on backend
-    if (socket) {
-      socket.emit('terminal:create', {
-        terminalId,
-        projectId,
-        shell: terminals.find((t) => t.id === terminalId)?.shell || defaultShell(),
-        cols: term.cols,
-        rows: term.rows,
-      });
-    }
+  };
+
+  // Ask the server for a shell for this tab, once, with the size we are actually rendering.
+  const requestSession = (terminalId) => {
+    const term = terminalRefs.current[terminalId];
+    if (!socket || !term) return;
+    if (!measuredTerminals.current.has(terminalId)) return;
+    if (createdSessions.current.has(terminalId)) return;
+    createdSessions.current.add(terminalId);
+    socket.emit('terminal:create', {
+      terminalId,
+      projectId,
+      shell: useTerminalStore.getState().terminals.find((t) => t.id === terminalId)?.shell || defaultShell(),
+      cols: term.cols,
+      rows: term.rows,
+    });
+  };
+
+  // The observer may have measured a tab before the socket arrived; spawn those shells as soon
+  // as there is a connection to spawn them on.
+  useEffect(() => {
+    if (!socket) return;
+    Object.keys(terminalRefs.current).forEach((terminalId) => requestSession(terminalId));
+  }, [socket, terminals, isVisible]);
+
+  const disposeTerminal = (terminalId) => {
+    resizeObserverRefs.current[terminalId]?.disconnect();
+    terminalRefs.current[terminalId]?.dispose();
+    delete resizeObserverRefs.current[terminalId];
+    delete terminalRefs.current[terminalId];
+    delete fitAddonRefs.current[terminalId];
+    createdSessions.current.delete(terminalId);
+    measuredTerminals.current.delete(terminalId);
   };
 
   const killProcess = (terminalId) => {
@@ -266,22 +316,14 @@ const TerminalPanel = ({ socket, projectId, isVisible, onToggle }) => {
     }
 
     // Dispose xterm instance
-    if (terminalRefs.current[terminalId]) {
-      terminalRefs.current[terminalId].dispose();
-      delete terminalRefs.current[terminalId];
-      delete fitAddonRefs.current[terminalId];
-    }
+    disposeTerminal(terminalId);
 
     removeTerminal(terminalId);
     toast.success('Terminal closed');
   };
 
   const handleClearTerminal = (terminalId) => {
-    const term = terminalRefs.current[terminalId];
-    if (term) {
-      term.clear();
-      clearTerminalOutput(terminalId);
-    }
+    terminalRefs.current[terminalId]?.clear();
   };
 
   const handleCopyOutput = (terminalId) => {

@@ -20,7 +20,7 @@
 
 /* xterm Container */
 .xterm-container {
-  background-color: #0D0F12;
+  background-color: #0A0A0B;
   overflow: hidden;
 }
 
@@ -30,7 +30,7 @@
 }
 
 .xterm-viewport {
-  background-color: #0D0F12 !important;
+  background-color: #0A0A0B !important;
   overflow-y: auto;
 }
 
@@ -39,16 +39,16 @@
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
-  background: #0D0F12;
+  background: #0A0A0B;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #292E38;
+  background: #232326;
   border-radius: 6px;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: #20242C;
+  background: #191A1D;
 }
 
 /* xterm Screen */
@@ -65,8 +65,8 @@
 
 /* Cursor */
 .xterm .xterm-cursor {
-  background-color: #F4F4F5 !important;
-  color: #0D0F12 !important;
+  background-color: #EDEDEF !important;
+  color: #0A0A0B !important;
 }
 
 .xterm.focus .xterm-cursor {
@@ -170,12 +170,12 @@
 
 /* Custom Prompt Styling */
 .xterm-link-layer a {
-  color: #E8A855 !important;
+  color: var(--vscode-accent) !important;
   text-decoration: underline;
 }
 
 .xterm-link-layer a:hover {
-  color: #F0BE7A !important;
+  color: var(--vscode-accent-hover) !important;
 }
 
 /* Error Text */
@@ -198,7 +198,7 @@
 
 /* Command Input Line */
 .xterm-prompt {
-  color: #E8A855;
+  color: var(--vscode-accent);
   font-weight: 600;
 }
 
@@ -226,7 +226,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #A1A1AA;
+  color: #8A8A8F;
 }
 
 .terminal-loading::after {
@@ -235,7 +235,7 @@
   width: 20px;
   height: 20px;
   margin-left: 10px;
-  border: 2px solid #A1A1AA;
+  border: 2px solid #8A8A8F;
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -284,13 +284,13 @@
 
 /* Dark Mode Overrides */
 .dark .terminal-panel {
-  background-color: #0D0F12;
-  border-color: #292E38;
+  background-color: #0A0A0B;
+  border-color: #232326;
 }
 
 .dark .terminal-header {
-  background-color: #15181D;
-  border-color: #292E38;
+  background-color: #101012;
+  border-color: #232326;
 }
 
 /* Light Mode (if needed) */
@@ -335,7 +335,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #A1A1AA;
+  background: #8A8A8F;
   margin-right: 6px;
 }
 

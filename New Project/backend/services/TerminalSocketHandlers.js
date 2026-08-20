@@ -13,7 +13,7 @@ import fs from 'fs';
 import os from 'os';
 import pty from 'node-pty';
 import { executionBlockedNotice } from '../config/execution.js';
-import { mirrorProjectToDisk } from '../controllers/FileSystemController.js';
+import { buildTree } from '../controllers/FileSystemController.js';
 import Project from '../models/Project.js';
 
 // terminalId -> { socketId, projectId, proc, cwd }
@@ -37,15 +37,37 @@ const canUseProject = async (projectId, userId) => {
   return Boolean(project);
 };
 
+// A short prompt showing only the current folder - the container's full host path
+// (Render mounts the app under something like ~/project/src/.../projects/<id>) is
+// noise the embedded terminal shouldn't be printing on every line.
+const shortPS1 = '\\W $ ';
+
+// bash's normal startup (~/.bashrc for non-login shells) sets its own PS1, which would
+// clobber an env var override. A tiny rcfile that sources ~/.bashrc first and then sets
+// PS1 last keeps the user's aliases/completions while still shortening the prompt.
+let bashRcFile = null;
+const getBashRcFile = () => {
+  if (bashRcFile) return bashRcFile;
+  const target = path.join(os.tmpdir(), 'codesync-terminal.bashrc');
+  fs.writeFileSync(target, `[ -f ~/.bashrc ] && source ~/.bashrc\nPS1='${shortPS1}'\n`);
+  bashRcFile = target;
+  return bashRcFile;
+};
+
 // The shell a user expects on this platform. Windows gets PowerShell unless they asked otherwise.
 const shellFor = (requested) => {
   if (os.platform() === 'win32') {
     if (requested === 'cmd') return { file: 'cmd.exe', args: [] };
-    if (requested === 'bash') return { file: 'bash.exe', args: ['-l'] };
+    if (requested === 'bash') return { file: 'bash.exe', args: [] };
     return { file: 'powershell.exe', args: ['-NoLogo'] };
   }
   const file = process.env.SHELL || (os.platform() === 'darwin' ? '/bin/zsh' : '/bin/bash');
-  return { file, args: ['-l'] };
+  // Non-login: a login shell sources .bash_profile, which on some base images (e.g. Render's)
+  // cd's to $HOME and silently overrides the cwd we just set to the project directory.
+  if (file.endsWith('bash')) {
+    return { file, args: ['--rcfile', getBashRcFile()] };
+  }
+  return { file, args: [] };
 };
 
 const countSessions = (socketId) => {
@@ -117,11 +139,11 @@ export const setupTerminalSockets = (io) => {
           return;
         }
 
+        // buildTree seeds the directory on first use; the shell and the explorer read the same
+        // bytes, so there is nothing to mirror.
+        await buildTree(projectId);
         const cwd = projectDir(projectId);
         fs.mkdirSync(cwd, { recursive: true });
-
-        // The editor keeps files in a JSON tree; put them on disk so the shell can run them.
-        await mirrorProjectToDisk(projectId);
 
         const { file, args } = shellFor(shell);
         const proc = pty.spawn(file, args, {
@@ -142,7 +164,8 @@ export const setupTerminalSockets = (io) => {
         sessions.set(terminalId, { socketId: socket.id, projectId, proc, cwd });
 
         // Output goes to the creating socket only: a shell on the host is not something to
-        // broadcast to every collaborator in the room.
+        // broadcast to every collaborator in the room. Files the shell writes are picked up by
+        // ProjectWatcher, which watches the directory itself.
         proc.onData((data) => socket.emit('terminal:output', { terminalId, output: data }));
 
         proc.onExit(({ exitCode }) => {
@@ -215,9 +238,6 @@ export const setupTerminalSockets = (io) => {
           });
           return;
         }
-
-        // Refresh the mirror: the file may have been saved a moment ago.
-        await mirrorProjectToDisk(projectId);
 
         const [terminalId, session] = entry;
         socket.emit('terminal:output', {

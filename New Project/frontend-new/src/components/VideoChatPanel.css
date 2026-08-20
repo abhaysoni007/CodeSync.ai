@@ -5,7 +5,7 @@
 .video-chat-tabs {
   display: flex;
   height: 40px;
-  border-bottom: 1px solid var(--vscode-border, #15181D);
+  border-bottom: 1px solid var(--vscode-border, #101012);
 }
 
 .video-chat-tabs .tab {
@@ -28,9 +28,9 @@
 }
 
 .video-chat-tabs .tab.active {
-  background: var(--vscode-bg, #15181D);
+  background: var(--vscode-bg, #101012);
   color: var(--vscode-text, #fff);
-  border-bottom: 2px solid var(--vscode-accent, #E8A855);
+  border-bottom: 2px solid var(--vscode-accent, #7C7CFF);
 }
 
 .video-chat-tabs .unread-badge {
@@ -141,12 +141,12 @@
 }
 
 .message-bubble.own {
-  background: var(--vscode-accent, #E8A855);
+  background: var(--vscode-accent, #7C7CFF);
   color: white;
 }
 
 .message-bubble.other {
-  background: var(--vscode-bg, #15181D);
+  background: var(--vscode-bg, #101012);
   color: var(--vscode-text, #fff);
 }
 
@@ -166,7 +166,7 @@
 /* Message Input */
 .message-input {
   padding: 12px;
-  border-top: 1px solid var(--vscode-border, #15181D);
+  border-top: 1px solid var(--vscode-border, #101012);
   display: flex;
   gap: 8px;
 }
@@ -174,8 +174,8 @@
 .message-input .input-field {
   flex: 1;
   padding: 8px 12px;
-  background: var(--vscode-bg, #15181D);
-  border: 1px solid var(--vscode-border, #15181D);
+  background: var(--vscode-bg, #101012);
+  border: 1px solid var(--vscode-border, #101012);
   border-radius: 6px;
   color: var(--vscode-text, #fff);
   font-size: 14px;
@@ -183,12 +183,12 @@
 
 .message-input .input-field:focus {
   outline: none;
-  border-color: var(--vscode-accent, #E8A855);
+  border-color: var(--vscode-accent, #7C7CFF);
 }
 
 .message-input .send-button {
   padding: 8px 12px;
-  background: var(--vscode-accent, #E8A855);
+  background: var(--vscode-accent, #7C7CFF);
   border: none;
   border-radius: 6px;
   color: white;
@@ -241,9 +241,9 @@
 .incoming-call-content {
   text-align: center;
   padding: 32px;
-  background: var(--vscode-panel, #0D0F12);
+  background: var(--vscode-panel, #0A0A0B);
   border-radius: 12px;
-  border: 2px solid var(--vscode-accent, #E8A855);
+  border: 2px solid var(--vscode-accent, #7C7CFF);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
@@ -251,7 +251,7 @@
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  color: var(--vscode-accent, #E8A855);
+  color: var(--vscode-accent, #7C7CFF);
   animation: pulse 2s infinite;
 }
 
@@ -358,7 +358,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 24px;
-  background: var(--vscode-accent, #E8A855);
+  background: var(--vscode-accent, #7C7CFF);
   border: none;
   border-radius: 6px;
   color: white;
@@ -426,7 +426,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0D0F12 0%, #15181D 100%);
+  background: linear-gradient(135deg, #0A0A0B 0%, #101012 100%);
   z-index: 5;
 }
 
@@ -434,7 +434,7 @@
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: var(--vscode-accent, #E8A855);
+  background: var(--vscode-accent, #7C7CFF);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -464,7 +464,7 @@
 /* Video Controls */
 .video-controls {
   padding: 12px;
-  border-top: 1px solid var(--vscode-border, #15181D);
+  border-top: 1px solid var(--vscode-border, #101012);
   display: flex;
   justify-content: center;
   gap: 12px;
@@ -475,7 +475,7 @@
   height: 48px;
   border-radius: 50%;
   border: none;
-  background: var(--vscode-bg, #15181D);
+  background: var(--vscode-bg, #101012);
   color: white;
   display: flex;
   align-items: center;
@@ -485,7 +485,7 @@
 }
 
 .control-button:hover {
-  background: var(--vscode-border, #15181D);
+  background: var(--vscode-border, #101012);
 }
 
 .control-button.off {
@@ -510,7 +510,7 @@
 
 /* Online Users */
 .online-users {
-  border-top: 1px solid var(--vscode-border, #15181D);
+  border-top: 1px solid var(--vscode-border, #101012);
   padding: 12px;
 }
 
@@ -558,12 +558,12 @@
 
 .messages-list::-webkit-scrollbar-track,
 .video-grid::-webkit-scrollbar-track {
-  background: var(--vscode-panel, #0D0F12);
+  background: var(--vscode-panel, #0A0A0B);
 }
 
 .messages-list::-webkit-scrollbar-thumb,
 .video-grid::-webkit-scrollbar-thumb {
-  background: var(--vscode-border, #15181D);
+  background: var(--vscode-border, #101012);
   border-radius: 4px;
 }
 

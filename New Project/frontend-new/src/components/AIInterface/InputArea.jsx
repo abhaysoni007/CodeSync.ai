@@ -42,7 +42,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
   const currentModel = models.find(m => m.id === model) || models[0];
 
   return (
-    <div className="border-t border-[#292E38] bg-[#15181D]">
+    <div className="border-t border-vscode-border bg-vscode-sidebar">
       {/* Input Area */}
       <div className="p-4">
         <div className="flex gap-2 items-end">
@@ -58,7 +58,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                   : 'Enter command (e.g., "Create a navbar component")...'
               }
               disabled={isLoading}
-              className="w-full bg-[#0D0F12] text-gray-200 border border-[#292E38] rounded-lg px-4 py-3 pr-12 resize-none focus:outline-none focus:border-[#E8A855] focus:ring-1 focus:ring-[#E8A855] disabled:opacity-50 disabled:cursor-not-allowed custom-scrollbar"
+              className="w-full bg-vscode-bg text-gray-200 border border-vscode-border rounded-lg px-4 py-3 pr-12 resize-none focus:outline-none focus:border-vscode-accent focus:ring-1 focus:ring-vscode-accent disabled:opacity-50 disabled:cursor-not-allowed custom-scrollbar"
               rows={1}
               style={{ maxHeight: '150px' }}
             />
@@ -80,8 +80,8 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
             disabled={!input.trim() || isLoading}
             className={`p-3 rounded-lg transition-all ${
               input.trim() && !isLoading
-                ? 'bg-[#E8A855] hover:bg-[#F0BE7A] text-[#14110A]'
-                : 'bg-[#1C2027] text-gray-600 cursor-not-allowed'
+                ? 'bg-vscode-accent hover:bg-vscode-accentHover text-vscode-bg'
+                : 'bg-vscode-panel text-gray-600 cursor-not-allowed'
             }`}
             whileHover={input.trim() && !isLoading ? { scale: 1.05 } : {}}
             whileTap={input.trim() && !isLoading ? { scale: 0.95 } : {}}
@@ -92,7 +92,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
       </div>
 
       {/* Bottom Controls Bar */}
-      <div className="px-4 pb-3 flex items-center justify-between border-t border-[#292E38]/50 pt-2">
+      <div className="px-4 pb-3 flex items-center justify-between border-t border-vscode-border/50 pt-2">
         {/* Left: Mode Selector */}
         <div className="relative">
           <button
@@ -101,7 +101,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
               setShowModeDropdown(!showModeDropdown);
               setShowModelDropdown(false);
             }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#1C2027] hover:bg-[#292E38] rounded-lg text-sm text-gray-300 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 bg-vscode-panel hover:bg-vscode-border rounded-lg text-sm text-gray-300 transition-colors"
           >
             <span>{currentMode.label}</span>
             <FiChevronDown className={`w-3 h-3 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} />
@@ -114,7 +114,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="absolute bottom-full left-0 mb-2 bg-[#15181D] border border-[#292E38] rounded-lg shadow-2xl overflow-hidden min-w-[200px] z-50"
+                className="absolute bottom-full left-0 mb-2 bg-vscode-sidebar border border-vscode-border rounded-lg shadow-2xl overflow-hidden min-w-[200px] z-50"
                 onClick={(e) => e.stopPropagation()}
               >
                 {modes.map((m) => (
@@ -124,8 +124,8 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                       switchMode(m.id);
                       setShowModeDropdown(false);
                     }}
-                    className={`w-full px-4 py-2.5 text-left hover:bg-[#1C2027] transition-colors ${
-                      mode === m.id ? 'bg-[#E8A855]/20 border-l-2 border-[#E8A855]' : ''
+                    className={`w-full px-4 py-2.5 text-left hover:bg-vscode-panel transition-colors ${
+                      mode === m.id ? 'bg-vscode-accent/20 border-l-2 border-vscode-accent' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -152,7 +152,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
               setShowModelDropdown(!showModelDropdown);
               setShowModeDropdown(false);
             }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#1C2027] hover:bg-[#292E38] rounded-lg text-sm text-gray-300 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 bg-vscode-panel hover:bg-vscode-border rounded-lg text-sm text-gray-300 transition-colors"
           >
             <span>{currentModel.label}</span>
             <FiChevronDown className={`w-3 h-3 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
@@ -165,7 +165,7 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="absolute bottom-full right-0 mb-2 bg-[#15181D] border border-[#292E38] rounded-lg shadow-2xl overflow-hidden min-w-[240px] z-50"
+                className="absolute bottom-full right-0 mb-2 bg-vscode-sidebar border border-vscode-border rounded-lg shadow-2xl overflow-hidden min-w-[240px] z-50"
                 onClick={(e) => e.stopPropagation()}
               >
                 {models.map((m) => (
@@ -175,8 +175,8 @@ const InputArea = ({ input, setInput, onSubmit, onKeyPress, isLoading }) => {
                       switchModel(m.id);
                       setShowModelDropdown(false);
                     }}
-                    className={`w-full px-4 py-2.5 text-left hover:bg-[#1C2027] transition-colors ${
-                      model === m.id ? 'bg-[#E8A855]/20 border-l-2 border-[#E8A855]' : ''
+                    className={`w-full px-4 py-2.5 text-left hover:bg-vscode-panel transition-colors ${
+                      model === m.id ? 'bg-vscode-accent/20 border-l-2 border-vscode-accent' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between">

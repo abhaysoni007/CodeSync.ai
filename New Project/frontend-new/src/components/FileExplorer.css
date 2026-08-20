@@ -14,8 +14,8 @@
 
 /* Theme Styles */
 .file-explorer.dark {
-  background-color: #0D0F12;
-  color: #F4F4F5;
+  background-color: #0A0A0B;
+  color: #EDEDEF;
 }
 
 .file-explorer.light {
@@ -37,8 +37,8 @@
 }
 
 .file-explorer.dark .file-explorer-header {
-  border-color: #15181D;
-  background-color: #15181D;
+  border-color: #101012;
+  background-color: #101012;
 }
 
 .file-explorer.light .file-explorer-header {
@@ -107,7 +107,7 @@
 }
 
 .file-explorer.dark .icon-btn:hover {
-  background-color: #20242C;
+  background-color: #191A1D;
 }
 
 .file-explorer.light .icon-btn:hover {
@@ -118,7 +118,7 @@
   position: absolute;
   bottom: 0;
   right: 0;
-  background: #E8A855;
+  background: var(--vscode-accent);
   border-radius: 50%;
   padding: 1px;
 }
@@ -140,7 +140,7 @@
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-track {
-  background: #0D0F12;
+  background: #0A0A0B;
 }
 
 .file-explorer.light .file-tree::-webkit-scrollbar-track {
@@ -148,7 +148,7 @@
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-thumb {
-  background: #292E38;
+  background: #232326;
   border-radius: 5px;
 }
 
@@ -158,7 +158,7 @@
 }
 
 .file-explorer.dark .file-tree::-webkit-scrollbar-thumb:hover {
-  background: #20242C;
+  background: #191A1D;
 }
 
 .file-explorer.light .file-tree::-webkit-scrollbar-thumb:hover {
@@ -186,7 +186,7 @@
 }
 
 .file-explorer.dark .tree-node-content:hover {
-  background-color: #20242C;
+  background-color: #191A1D;
 }
 
 .file-explorer.light .tree-node-content:hover {
@@ -194,7 +194,7 @@
 }
 
 .file-explorer.dark .tree-node-content.selected {
-  background-color: #20242C;
+  background-color: #191A1D;
 }
 
 .file-explorer.light .tree-node-content.selected {
@@ -202,7 +202,7 @@
 }
 
 .file-explorer.dark .tree-node-content.selected:hover {
-  background-color: #20242C;
+  background-color: #191A1D;
 }
 
 .file-explorer.light .tree-node-content.selected:hover {
@@ -253,7 +253,7 @@
   flex: 1;
   font-size: 13px;
   padding: 2px 4px;
-  border: 1px solid #E8A855;
+  border: 1px solid var(--vscode-accent);
   border-radius: 2px;
   outline: none;
   background: transparent;
@@ -262,7 +262,7 @@
 }
 
 .file-explorer.dark .rename-input {
-  background-color: #0D0F12;
+  background-color: #0A0A0B;
 }
 
 .file-explorer.light .rename-input {
@@ -288,8 +288,8 @@
 }
 
 .context-menu.dark {
-  background-color: #1C2027;
-  border: 1px solid #292E38;
+  background-color: #131315;
+  border: 1px solid #232326;
 }
 
 .context-menu.light {
@@ -319,7 +319,7 @@
 }
 
 .context-menu.dark .context-menu-item:hover {
-  background-color: #3A2A14;
+  background-color: #1D1B3A;
 }
 
 .context-menu.light .context-menu-item:hover {
@@ -346,7 +346,7 @@
 }
 
 .context-menu.dark .context-menu-divider {
-  background-color: #292E38;
+  background-color: #232326;
 }
 
 .context-menu.light .context-menu-divider {
@@ -385,8 +385,8 @@
 }
 
 .modal-content.dark {
-  background-color: #1C2027;
-  color: #F4F4F5;
+  background-color: #131315;
+  color: #EDEDEF;
 }
 
 .modal-content.light {
@@ -412,9 +412,9 @@
 }
 
 .modal-content.dark .modal-input {
-  background-color: #0D0F12;
-  border-color: #292E38;
-  color: #F4F4F5;
+  background-color: #0A0A0B;
+  border-color: #232326;
+  color: #EDEDEF;
 }
 
 .modal-content.light .modal-input {
@@ -424,7 +424,7 @@
 }
 
 .modal-input:focus {
-  border-color: #E8A855;
+  border-color: var(--vscode-accent);
 }
 
 .modal-actions {
@@ -446,12 +446,12 @@
 }
 
 .btn-primary {
-  background-color: #E8A855;
+  background-color: var(--vscode-accent);
   color: #ffffff;
 }
 
 .btn-primary:hover {
-  background-color: #F0BE7A;
+  background-color: var(--vscode-accent-hover);
 }
 
 .btn-primary:active {
@@ -465,7 +465,7 @@
 }
 
 .modal-content.dark .btn-secondary {
-  border-color: #292E38;
+  border-color: #232326;
 }
 
 .modal-content.light .btn-secondary {
@@ -473,7 +473,7 @@
 }
 
 .modal-content.dark .btn-secondary:hover {
-  background-color: #20242C;
+  background-color: #191A1D;
 }
 
 .modal-content.light .btn-secondary:hover {
@@ -506,7 +506,7 @@
 }
 
 .file-explorer.dark .spinner {
-  border-color: #292E38;
+  border-color: #232326;
   border-top-color: transparent;
 }
 
@@ -523,7 +523,7 @@
 
 .file-explorer-error button {
   padding: 8px 16px;
-  background-color: #E8A855;
+  background-color: var(--vscode-accent);
   color: white;
   border: none;
   border-radius: 4px;
@@ -533,7 +533,7 @@
 }
 
 .file-explorer-error button:hover {
-  background-color: #F0BE7A;
+  background-color: var(--vscode-accent-hover);
 }
 
 /* ============================================
@@ -583,4 +583,25 @@
 .tree-node-children {
   overflow: hidden;
   transition: height 0.2s ease;
+}
+
+/* Refresh spinner, drop highlight and the "not expanded" badge on skipped folders. */
+@keyframes fe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.file-explorer .spinning {
+  animation: fe-spin 0.7s linear infinite;
+}
+
+.file-explorer .tree-node-content.drop-target {
+  outline: 1px dashed var(--vscode-accent, #7c7cff);
+  outline-offset: -1px;
+  background: rgba(232, 168, 85, 0.08);
+}
+
+.file-explorer .node-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.5;
 }

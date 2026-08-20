@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { verifyToken } from '../utils/jwt.js';
 import yjsManager from '../services/YjsManager.js';
 import RoomMember from '../models/RoomMember.js';
@@ -9,6 +10,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
+import { startWatching, stopWatching } from './ProjectWatcher.js';
 
 // Debounce helper for activity logging
 const activityDebounce = new Map();
@@ -72,10 +74,9 @@ const logFileEdit = async (projectId, userId, username, fileId, fileName, io) =>
       userId,
       type: 'file_edited',
       action: `${username} edited file ${fileName}`,
-      metadata: {
-        fileName,
-        fileId
-      }
+      // Files in the explorer are identified by tree path, not by a Mongo id. Setting fileId to a
+      // path segment made the whole activity fail schema validation and vanish silently.
+      metadata: mongoose.isValidObjectId(fileId) ? { fileName, fileId } : { fileName }
     });
     
     activityDebounce.delete(key);
@@ -348,6 +349,7 @@ export const setupYjsHandlers = (io) => {
       // Handle project room disconnect
       if (socket.currentProject) {
         const projectRoom = `project:${socket.currentProject}`;
+        stopWatching(socket.currentProject);
         
         // Remove from active call if present
         const call = projectCalls.get(socket.currentProject);
@@ -552,6 +554,10 @@ export const setupYjsHandlers = (io) => {
         socket.join(projectRoom);
         socket.currentProject = projectId;
 
+        // Watch the workspace while anyone is in it. This is what turns "the shell wrote a file"
+        // or "vite emitted a build" into a tree refresh for every connected client.
+        startWatching(io, projectId);
+
         // Log activity and broadcast in real-time
         await logAndBroadcastActivity(io, {
           projectId,
@@ -618,6 +624,7 @@ export const setupYjsHandlers = (io) => {
         }
 
         socket.leave(projectRoom);
+        stopWatching(projectId);
 
         // Broadcast user left
         socket.to(projectRoom).emit('user-left', {
@@ -914,6 +921,10 @@ export const setupYjsHandlers = (io) => {
         username: socket.username,
         timestamp: new Date().toISOString()
       });
+
+      // Saving is an edit. Debounced, because a burst of Ctrl+S is one edit to a reader, not five.
+      const fileName = Array.isArray(path) ? path[path.length - 1] : path;
+      logFileEdit(projectId, socket.userId, socket.username, fileName, fileName, io);
     });
 
     /**

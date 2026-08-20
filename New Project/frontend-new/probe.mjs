@@ -1,0 +1,14 @@
+import { chromium } from '@playwright/test';
+import fs from 'fs';
+const fx = JSON.parse(fs.readFileSync('e2e/.auth/fixture.json','utf8'));
+const b = await chromium.launch();
+const ctx = await b.newContext({ storageState: 'e2e/.auth/state.json' });
+const p = await ctx.newPage();
+p.on('console', m => console.log('CONSOLE:', m.text().slice(0,300)));
+p.on('pageerror', e => console.log('PAGEERROR:', e.message));
+p.on('requestfailed', r => console.log('REQFAIL:', r.url(), r.failure()?.errorText));
+await p.goto('http://localhost:5173/project/' + fx.projectId, { waitUntil: 'networkidle' }).catch(e=>console.log('GOTO:',e.message));
+await p.waitForTimeout(4000);
+console.log('HAS EXPLORER:', await p.locator('.file-explorer').count());
+console.log('BODY:', (await p.locator('body').innerText()).slice(0,500));
+await b.close();
