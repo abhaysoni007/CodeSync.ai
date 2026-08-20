@@ -4,6 +4,7 @@ import Project from '../models/Project.js';
 import Activity from '../models/Activity.js';
 import Message from '../models/Message.js';
 import { authenticate } from '../middleware/auth.js';
+import { createProjectCallToken } from '../controllers/CallSessionController.js';
 
 const router = express.Router();
 
@@ -454,5 +455,12 @@ router.get('/:id/messages', authenticate, async (req, res) => {
 
 // NOTE: the old GET /projects/:id/files route (which returned hardcoded demo files) was removed
 // in M0. Project files are now served solely by /api/filesystem/* (see routes/filesystem.js).
+
+/**
+ * @route   POST /projects/:id/call-token
+ * @desc    Generate LiveKit access token for project video call
+ * @access  Private
+ */
+router.post('/:id/call-token', authenticate, createProjectCallToken);
 
 export default router;

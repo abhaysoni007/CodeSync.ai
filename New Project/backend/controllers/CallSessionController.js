@@ -2,9 +2,11 @@ import { AccessToken } from 'livekit-server-sdk';
 import CallSession from '../models/CallSession.js';
 import Room from '../models/Room.js';
 import RoomMember from '../models/RoomMember.js';
+import Project from '../models/Project.js';
 
 /**
  * Generate LiveKit access token for video call
+ * @deprecated Legacy room-based video calling. Kept for backwards compatibility.
  */
 export const createCallToken = async (req, res) => {
   try {
@@ -111,6 +113,85 @@ export const createCallToken = async (req, res) => {
 
   } catch (error) {
     console.error('Create call token error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create call token',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Generate LiveKit access token for project video call
+ */
+export const createProjectCallToken = async (req, res) => {
+  try {
+    const { id: projectId } = req.params;
+    const userId = req.user.id;
+    const username = req.user.username;
+
+    // Verify project exists
+    const project = await Project.findById(projectId);
+    if (!project || project.isArchived) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found'
+      });
+    }
+
+    // Check if user is a member
+    const hasAccess = project.ownerId.toString() === userId.toString() ||
+      project.members.some(m => m.userId.toString() === userId.toString());
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to join this project call'
+      });
+    }
+
+    // LiveKit configuration - fail clearly if missing
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL;
+
+    if (!apiKey || !apiSecret || !livekitUrl) {
+      return res.status(500).json({
+        success: false,
+        message: 'LiveKit configuration is missing on the server'
+      });
+    }
+
+    const roomName = `codesync-project-${projectId}`;
+
+    // Create access token
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: userId,
+      name: username,
+      ttl: '4h' // Token valid for 4 hours
+    });
+
+    // Grant permissions for a regular participant
+    at.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true
+    });
+
+    const token = await at.toJwt();
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        url: livekitUrl
+      }
+    });
+
+  } catch (error) {
+    console.error('Create project call token error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create call token',
